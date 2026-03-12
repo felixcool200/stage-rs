@@ -351,18 +351,20 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
 
     let context_style = Style::default().fg(Color::DarkGray);
 
+    let left_marker_style = Style::default().fg(if left_selected { Color::Cyan } else { Color::Rgb(60, 60, 60) });
+
     let mut left_lines: Vec<Line> = Vec::new();
     for l in context_before {
-        left_lines.push(Line::from(Span::styled(format!(" {l}"), context_style)));
+        left_lines.push(Line::from(Span::styled(format!("  {l}"), context_style)));
     }
     for l in &section.ours {
-        left_lines.push(Line::from(Span::styled(
-            format!(" {l}"),
-            Style::default().fg(left_fg).bg(left_bg),
-        )));
+        left_lines.push(Line::from(vec![
+            Span::styled("~ ", left_marker_style),
+            Span::styled(l.to_string(), Style::default().fg(left_fg).bg(left_bg)),
+        ]));
     }
     for l in context_after {
-        left_lines.push(Line::from(Span::styled(format!(" {l}"), context_style)));
+        left_lines.push(Line::from(Span::styled(format!("  {l}"), context_style)));
     }
 
     // Scroll so the conflict lines are visible (skip context_before if it's too long)
@@ -391,18 +393,20 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
     let right_inner = right_block.inner(halves[1]);
     frame.render_widget(right_block, halves[1]);
 
+    let right_marker_style = Style::default().fg(if right_selected { Color::Magenta } else { Color::Rgb(60, 60, 60) });
+
     let mut right_lines: Vec<Line> = Vec::new();
     for l in context_before {
-        right_lines.push(Line::from(Span::styled(format!(" {l}"), context_style)));
+        right_lines.push(Line::from(Span::styled(format!("  {l}"), context_style)));
     }
     for l in &section.theirs {
-        right_lines.push(Line::from(Span::styled(
-            format!(" {l}"),
-            Style::default().fg(right_fg).bg(right_bg),
-        )));
+        right_lines.push(Line::from(vec![
+            Span::styled("~ ", right_marker_style),
+            Span::styled(l.to_string(), Style::default().fg(right_fg).bg(right_bg)),
+        ]));
     }
     for l in context_after {
-        right_lines.push(Line::from(Span::styled(format!(" {l}"), context_style)));
+        right_lines.push(Line::from(Span::styled(format!("  {l}"), context_style)));
     }
 
     frame.render_widget(

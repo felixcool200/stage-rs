@@ -1312,6 +1312,7 @@ impl App {
         match ds.view_mode {
             DiffViewMode::HunkNav => {
                 ds.scroll = ds.scroll.saturating_sub(1);
+                Self::update_current_hunk_from_scroll(ds);
             }
             DiffViewMode::LineNav => {
                 if let Some(pos) = ds.hunk_changed_rows.iter().position(|&r| r == ds.cursor_line) {
@@ -1389,6 +1390,7 @@ impl App {
                 if ds.scroll < ds.max_scroll {
                     ds.scroll += 1;
                 }
+                Self::update_current_hunk_from_scroll(ds);
             }
             DiffViewMode::LineNav => {
                 if let Some(pos) = ds.hunk_changed_rows.iter().position(|&r| r == ds.cursor_line) {
@@ -1547,6 +1549,22 @@ impl App {
                 ds.current_hunk = i;
                 return;
             }
+        }
+    }
+
+    /// Update current_hunk to the hunk nearest the 1/3 viewport line during scroll.
+    fn update_current_hunk_from_scroll(ds: &mut DiffState) {
+        let focus_line = ds.scroll + ds.viewport_height / 3;
+        // Find the hunk that contains focus_line, or the nearest one after it
+        for (i, hunk) in ds.hunks.iter().enumerate() {
+            if focus_line < hunk.display_end {
+                ds.current_hunk = i;
+                return;
+            }
+        }
+        // Past all hunks — select the last one
+        if !ds.hunks.is_empty() {
+            ds.current_hunk = ds.hunks.len() - 1;
         }
     }
 

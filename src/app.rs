@@ -211,6 +211,7 @@ pub enum Message {
     StageLines,
     SelectAllLines,
     CycleKeymap,
+    YankToClipboard,
     // Commit / log
     OpenCommit,
     OpenCommitAmend,
@@ -386,6 +387,20 @@ impl App {
             Message::CycleKeymap => {
                 self.keymap = self.keymap.cycle();
                 self.status_message = Some(format!("Keymap: {}", self.keymap.label()));
+            }
+            Message::YankToClipboard => {
+                let text = self.get_yank_text();
+                if let Some(text) = text {
+                    match cli_clipboard::set_contents(text.clone()) {
+                        Ok(()) => {
+                            let preview: String = text.chars().take(40).collect();
+                            self.status_message = Some(format!("Yanked: {preview}"));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Clipboard error: {e}"));
+                        }
+                    }
+                }
             }
 
             // ── Commit / Log ─────────────────────────────────────────────
@@ -691,6 +706,29 @@ impl App {
             self.selected_index = self.file_entries.len().saturating_sub(1);
         }
         Ok(())
+    }
+
+    fn get_yank_text(&self) -> Option<String> {
+        // In git log overlay, yank the selected commit hash
+        if let Overlay::GitLog { entries, selected, .. } = &self.overlay {
+            return entries.get(*selected).map(|e| e.hash.clone());
+        }
+        // In diff line mode, yank selected lines
+        if let Some(ds) = &self.diff_state {
+            if ds.view_mode == DiffViewMode::LineNav && !ds.selected_lines.is_empty() {
+                let lines: Vec<String> = ds.selected_lines.iter()
+                    .filter_map(|&row| ds.right_lines.get(row).map(|l| l.content.clone()))
+                    .collect();
+                if !lines.is_empty() {
+                    return Some(lines.join("\n"));
+                }
+            }
+        }
+        // In file list, yank the file path
+        if let Some(entry) = self.file_entries.get(self.selected_index) {
+            return Some(entry.path.clone());
+        }
+        None
     }
 
     fn load_selected_diff(&mut self) -> Result<()> {

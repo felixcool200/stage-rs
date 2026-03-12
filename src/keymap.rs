@@ -62,6 +62,7 @@ pub fn resolve(keymap: KeymapName, ctx: InputContext, key: KeyEvent) -> Option<M
         KeyCode::Char('C') => return Some(Message::OpenCommitAmend),
         KeyCode::Char('z') => return Some(Message::UndoLastCommit),
         KeyCode::Char('g') => return Some(Message::OpenGitLog),
+        KeyCode::Char('y') => return Some(Message::YankToClipboard),
         _ => {}
     }
 

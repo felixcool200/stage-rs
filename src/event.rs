@@ -87,6 +87,7 @@ fn handle_git_log(code: KeyCode) -> Option<Message> {
         KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseOverlay),
         KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
         KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
+        KeyCode::Char('y') => Some(Message::YankToClipboard),
         _ => None,
     }
 }

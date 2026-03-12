@@ -235,6 +235,73 @@ EOF
 git add -A
 git commit -m "Update demo app with loop and clap"
 
+# ── Create a branch for rebase conflict testing ─────────────────────────────
+# Branch off from the commit before master's last (so rebasing onto master
+# will conflict on lib.rs and data.json — two separate commits, two conflicts)
+
+git checkout -b rebase-test HEAD~1
+
+# First conflicting commit on rebase-test: change lib.rs differently
+cat > lib.rs <<'EOF'
+pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+pub fn subtract(a: i32, b: i32) -> i32 {
+    a - b
+}
+
+pub fn multiply(a: i32, b: i32) -> i32 {
+    a * b
+}
+
+pub fn power(base: i32, exp: u32) -> i32 {
+    base.pow(exp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add() {
+        assert_eq!(add(2, 3), 5);
+    }
+
+    #[test]
+    fn test_subtract() {
+        assert_eq!(subtract(5, 3), 2);
+    }
+
+    #[test]
+    fn test_power() {
+        assert_eq!(power(2, 3), 8);
+    }
+}
+EOF
+git add lib.rs
+git commit -m "Add power function to lib"
+
+# Second conflicting commit: change data.json differently
+cat > data.json <<'EOF'
+{
+    "name": "test-project",
+    "version": "3.0.0-beta",
+    "entries": [
+        { "id": 1, "label": "one" },
+        { "id": 2, "label": "two" },
+        { "id": 3, "label": "three" },
+        { "id": 4, "label": "four" },
+        { "id": 5, "label": "five" }
+    ]
+}
+EOF
+git add data.json
+git commit -m "Rename entries and bump to v3 beta"
+
+# Go back to master
+git checkout master
+
 # ── Merge to create conflicts ───────────────────────────────────────────────
 
 git merge feature-refactor --no-commit --no-ff 2>/dev/null || true
@@ -376,5 +443,11 @@ echo "  STAGED+M  lib.rs                (staged changes + further unstaged edits
 echo "  MODIFIED  data.json             (unstaged modification)"
 echo "  UNTRACKED notes.txt, wide.rs    (new files)"
 echo "  CLEAN     style.css, Makefile, src/utils.py"
+echo ""
+echo "Branches:"
+echo "  master           — active branch with merge conflict in progress"
+echo "  feature-refactor — branch used for the merge conflict"
+echo "  rebase-test      — 2 commits that conflict with master (lib.rs, data.json)"
+echo "                     Use: resolve merge, commit, then rebase rebase-test onto master"
 echo ""
 echo "Run:  cargo run -- $TARGET"

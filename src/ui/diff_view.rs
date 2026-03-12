@@ -138,14 +138,6 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
         .map(|(i, dl)| {
             let highlight = get_line_highlight(ds, i, is_focused);
 
-            // Show hunk header at the start of the current hunk (only in hunk mode)
-            if ds.view_mode == DiffViewMode::HunkNav
-                && highlight == LineHighlight::CurrentHunk
-                && ds.hunks.get(ds.current_hunk).map(|h| h.display_start) == Some(i)
-            {
-                return hunk_header_line(ds, i);
-            }
-
             let line_num = format!("{:>4} ", i + 1);
             let (num_style, text_style) = line_styles(&dl.kind, &highlight);
 
@@ -300,25 +292,6 @@ fn get_line_highlight(
     }
 }
 
-fn hunk_header_line(ds: &crate::app::DiffState, display_row: usize) -> Line<'static> {
-    let hunk = &ds.hunks[ds.current_hunk];
-    let dl = &ds.right_lines[display_row];
-    let line_num = format!("{:>4} ", display_row + 1);
-
-    let (num_style, text_style) = line_styles(&dl.kind, &LineHighlight::CurrentHunk);
-
-    Line::from(vec![
-        Span::styled(
-            format!("{} ", hunk.header),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(line_num, num_style),
-        Span::styled(dl.content.clone(), text_style),
-    ])
-}
-
 fn render_conflict(frame: &mut Frame, cs: &ConflictState, area: Rect) {
     let block = Block::default()
         .title(format!(
@@ -439,7 +412,7 @@ fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight) -> (Style, Style)
             Style::default().fg(Color::Red).bg(if change_bg_boost {
                 Color::Rgb(60, 20, 20)
             } else {
-                Color::Reset
+                Color::Rgb(40, 10, 10)
             }),
         ),
         DiffLineKind::Added => (
@@ -447,7 +420,7 @@ fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight) -> (Style, Style)
             Style::default().fg(Color::Green).bg(if change_bg_boost {
                 Color::Rgb(20, 60, 20)
             } else {
-                Color::Reset
+                Color::Rgb(10, 40, 10)
             }),
         ),
         DiffLineKind::Spacer => (

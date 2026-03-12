@@ -126,6 +126,24 @@ impl GitRepo {
         operations::create_branch(&self.repo, name)
     }
 
+    pub fn is_rebasing(&self) -> bool {
+        let git_dir = self.repo.path();
+        git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists()
+    }
+
+    #[allow(dead_code)]
+    pub fn is_merging(&self) -> bool {
+        self.repo.path().join("MERGE_HEAD").exists()
+    }
+
+    pub fn rebase_continue(&self) -> Result<String> {
+        operations::git_rebase_continue(self.workdir())
+    }
+
+    pub fn rebase_abort(&self) -> Result<String> {
+        operations::git_rebase_abort(self.workdir())
+    }
+
     pub fn fetch(&self) -> Result<String> {
         operations::git_fetch(self.workdir())
     }

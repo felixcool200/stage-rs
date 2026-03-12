@@ -53,10 +53,8 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             if let Some(msg) = poll_conflict_mode(app)? {
                 app.update(msg)?;
             }
-        } else if app.edit_state.is_some() {
-            if let Some(msg) = poll_edit_mode(app)? {
-                app.update(msg)?;
-            }
+        } else if app.pending_editor.is_some() {
+            spawn_editor(terminal, app)?;
         } else if matches!(app.overlay, Overlay::CommitInput { .. }) {
             if let Some(msg) = poll_with_text_input(app)? {
                 app.update(msg)?;
@@ -108,36 +106,53 @@ fn poll_conflict_mode(app: &mut App) -> Result<Option<app::Message>> {
     })
 }
 
-fn poll_edit_mode(app: &mut App) -> Result<Option<app::Message>> {
-    if !crossterm::event::poll(Duration::from_millis(250))? {
-        return Ok(None);
-    }
-    let event = crossterm::event::read()?;
+fn spawn_editor(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+    let req = app.pending_editor.take().unwrap();
+    let workdir = app.repo.workdir().to_path_buf();
+    let full_path = workdir.join(&req.file_path);
 
-    if let crossterm::event::Event::Key(key) = &event {
-        if key.kind != crossterm::event::KeyEventKind::Press {
-            return Ok(None);
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".into());
+
+    // Suspend TUI
+    ratatui::restore();
+
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "{} +{} '{}'",
+            editor,
+            req.line_number,
+            full_path.display()
+        ))
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status();
+
+    // Restore TUI
+    *terminal = ratatui::init();
+
+    match status {
+        Ok(s) if s.success() => {
+            app.status_message = Some(format!("Editor closed: {}", req.file_path));
         }
-        use crossterm::event::{KeyCode, KeyModifiers};
-        match (key.modifiers, key.code) {
-            (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
-                return Ok(Some(app::Message::SaveEdit));
-            }
-            (_, KeyCode::Esc) => {
-                return Ok(Some(app::Message::ExitEditMode));
-            }
-            (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-                return Ok(Some(app::Message::Quit));
-            }
-            _ => {}
+        Ok(s) => {
+            app.status_message = Some(format!(
+                "Editor exited with code {}",
+                s.code().unwrap_or(-1)
+            ));
+        }
+        Err(e) => {
+            app.status_message = Some(format!("Failed to launch '{}': {}", editor, e));
         }
     }
 
-    // Forward event to textarea
-    if let Some(edit) = &mut app.edit_state {
-        edit.textarea.input(event);
-    }
-    Ok(None)
+    // Reload file list and diff
+    app.update(app::Message::Refresh)?;
+
+    Ok(())
 }
 
 fn poll_branch_create(app: &mut App) -> Result<Option<app::Message>> {

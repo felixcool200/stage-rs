@@ -23,8 +23,8 @@ pub struct App {
     /// Blame annotations for the current file (None = blame not loaded)
     pub blame_data: Option<Vec<BlameLine>>,
     pub show_blame: bool,
-    /// Edit mode state
-    pub edit_state: Option<EditState>,
+    /// Pending request to open $EDITOR
+    pub pending_editor: Option<EditorRequest>,
     /// Conflict resolver state
     pub conflict_state: Option<ConflictState>,
     /// Syntax highlighter
@@ -56,9 +56,9 @@ pub enum ConflictResolution {
     Both,
 }
 
-pub struct EditState {
+pub struct EditorRequest {
     pub file_path: String,
-    pub textarea: tui_textarea::TextArea<'static>,
+    pub line_number: usize,
 }
 
 pub struct DiffState {
@@ -305,8 +305,6 @@ pub enum Message {
     SplitHunk,
     ToggleBlame,
     EnterEditMode,
-    ExitEditMode,
-    SaveEdit,
     // Merge conflict resolution
     OpenConflictResolver,
     ConflictPickOurs,
@@ -379,7 +377,7 @@ impl App {
             file_filter: None,
             blame_data: None,
             show_blame: false,
-            edit_state: None,
+            pending_editor: None,
             conflict_state: None,
             highlighter: Highlighter::new(),
         })
@@ -547,80 +545,28 @@ impl App {
             Message::EnterEditMode => {
                 if let Some(ds) = &self.diff_state {
                     let path = ds.file_path.clone();
-                    let workdir = self.repo.workdir().to_path_buf();
-                    let full_path = workdir.join(&path);
 
                     // Map current diff scroll position to a file line number.
                     // Count non-spacer lines in right_lines up to the scroll position.
-                    let target_line = {
-                        let scroll = ds.scroll;
-                        let mut file_line: usize = 0;
-                        for (i, dl) in ds.right_lines.iter().enumerate() {
-                            if i >= scroll {
-                                break;
-                            }
-                            if dl.kind != git::DiffLineKind::Spacer {
-                                file_line += 1;
-                            }
+                    let scroll = ds.scroll;
+                    let mut file_line: usize = 0;
+                    for (i, dl) in ds.right_lines.iter().enumerate() {
+                        if i >= scroll {
+                            break;
                         }
-                        file_line
-                    };
-
-                    match std::fs::read_to_string(&full_path) {
-                        Ok(content) => {
-                            let lines: Vec<String> = content.lines().map(String::from).collect();
-                            let line_count = lines.len();
-                            let mut textarea = tui_textarea::TextArea::new(lines);
-                            textarea.set_line_number_style(
-                                ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
-                            );
-                            textarea.set_cursor_line_style(
-                                ratatui::style::Style::default().bg(ratatui::style::Color::Rgb(40, 40, 60)),
-                            );
-                            // Move cursor to the mapped file line
-                            let goto = target_line.min(line_count.saturating_sub(1));
-                            for _ in 0..goto {
-                                textarea.move_cursor(tui_textarea::CursorMove::Down);
-                            }
-                            self.edit_state = Some(EditState {
-                                file_path: path,
-                                textarea,
-                            });
-                            self.status_message = Some("-- INSERT --".into());
-                        }
-                        Err(e) => {
-                            self.status_message = Some(format!("Cannot read file: {e}"));
+                        if dl.kind != git::DiffLineKind::Spacer {
+                            file_line += 1;
                         }
                     }
+                    // Editor line numbers are 1-based
+                    let line_number = file_line.max(1);
+
+                    self.pending_editor = Some(EditorRequest {
+                        file_path: path,
+                        line_number,
+                    });
                 } else {
                     self.status_message = Some("Select a file first (Enter on file list)".into());
-                }
-            }
-            Message::ExitEditMode => {
-                self.edit_state = None;
-                // Reload diff to reflect any saved changes
-                if self.diff_state.is_some() {
-                    self.load_selected_diff()?;
-                }
-                self.status_message = None;
-            }
-            Message::SaveEdit => {
-                if let Some(edit) = &self.edit_state {
-                    let workdir = self.repo.workdir().to_path_buf();
-                    let full_path = workdir.join(&edit.file_path);
-                    let content = edit.textarea.lines().join("\n");
-                    // Add trailing newline if original had one
-                    let content = if content.is_empty() { content } else { content + "\n" };
-                    match std::fs::write(&full_path, &content) {
-                        Ok(()) => {
-                            self.status_message = Some(format!("Saved: {}", edit.file_path));
-                            self.refresh()?;
-                            self.load_selected_diff()?;
-                        }
-                        Err(e) => {
-                            self.status_message = Some(format!("Save failed: {e}"));
-                        }
-                    }
                 }
             }
             Message::OpenConflictResolver => {

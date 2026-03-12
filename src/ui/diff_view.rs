@@ -88,18 +88,6 @@ pub fn render_right(app: &App, frame: &mut Frame, area: Rect) {
         return;
     }
 
-    // If in insert (edit) mode, render the textarea instead
-    if let Some(edit) = &app.edit_state {
-        let block = Block::default()
-            .title(format!(" {} [Ctrl+S save, Esc normal] ", edit.file_path))
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green));
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        frame.render_widget(&edit.textarea, inner);
-        return;
-    }
-
     render_right_diff(app, frame, area);
 }
 

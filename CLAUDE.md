@@ -22,18 +22,30 @@ cargo fmt                          # Format
 2. **Update** → `app.rs` `App::update(Message)` handles all state transitions in a single match
 3. **View** → `ui/` modules render the current `App` state as ratatui widgets (pure functions, no mutation)
 
-The main loop in `main.rs` drives this cycle. When a modal overlay is active (commit input, git log, confirm dialog), key routing bypasses the normal keymap and goes through overlay-specific handlers in `event.rs`.
+The main loop in `main.rs` drives this cycle and has multiple input paths:
+- Normal mode: keymap resolution via `event.rs`
+- Commit input: raw text input to `TextInput`
+- Edit mode: events forwarded to `tui-textarea`
+- Filter mode: character input for file search
+- Branch creation: character input for branch name
+- Conflict resolver: dedicated key handlers
+
+When a modal overlay is active, key routing bypasses the normal keymap and goes through overlay-specific handlers in `event.rs`.
 
 ### Key modules
 
-- **`app.rs`** — Central state (`App` struct), `Message` enum, `Overlay` enum for modal popups, `DiffState` for diff navigation, `TextInput` for commit message editing. This is the largest file and the heart of the app.
-- **`git/`** — All git2 interactions behind `GitRepo` wrapper. `diff.rs` contains the diff computation engine using the `similar` crate plus hunk/line-level staging logic (reconstructs file content by selectively applying changes, writes as blob to index). All unit tests live here.
+- **`app.rs`** — Central state (`App` struct), `Message` enum, `Overlay` enum for modal popups, `DiffState` for diff navigation, `TextInput` for commit message editing, `ConflictState` for merge resolution, `EditState` for inline editing. This is the largest file and the heart of the app.
+- **`git/`** — All git2 interactions behind `GitRepo` wrapper. `diff.rs` contains the diff computation engine using the `similar` crate plus hunk/line-level staging logic. `operations.rs` has stage/unstage/commit/stash/branch/remote operations. `log.rs` has commit log, blame, and commit diff. All unit tests live in `diff.rs`.
 - **`keymap.rs`** — Table-driven key resolution with `InputContext` (FileList, DiffHunkNav, DiffLineNav) determining which bindings are active. Vim and Helix keymaps share navigation but differ in selection semantics.
-- **`ui/`** — Pure rendering. Two-panel layout: file list (30 cols fixed) + side-by-side diff (50/50 split). Overlays render on top via `popup.rs`.
+- **`ui/`** — Pure rendering. Two-panel layout: file list (30 cols fixed) + side-by-side diff (50/50 split). Overlays render on top via `popup.rs`. `diff_view.rs` handles edit mode, conflict resolver, and blame annotations.
 
 ### Partial staging flow
 
 Hunk and line staging don't use git's patch machinery. Instead, `apply_hunk()` / `apply_lines()` in `git/diff.rs` walk the diff output and reconstruct a new file by cherry-picking which changes to include, then `stage_content()` writes the result as a blob directly to the git index.
+
+### Remote operations
+
+Push, pull, and fetch shell out to `git` CLI rather than using git2's remote API, to leverage existing SSH keys and credential helpers.
 
 ## Dependencies
 
@@ -41,10 +53,14 @@ Hunk and line staging don't use git's patch machinery. Instead, `apply_hunk()` /
 - **git2 0.19** — libgit2 bindings (all git operations)
 - **similar 2** — Text diffing engine (with `text` feature)
 - **color-eyre 0.6** — Error handling
+- **tui-textarea 0.7** — Inline text editing widget
+- **cli-clipboard 0.4** — System clipboard access
 - `instability` pinned to 0.3.7 in Cargo.lock for rustc 1.87 compatibility
 
 ## Special patterns to know
 
-- `poll_with_text_input()` in `main.rs` exists because commit message editing needs raw character input, while normal mode routes through the keymap resolver. The main loop switches between these two paths based on whether `Overlay::CommitInput` is active.
+- `main.rs` has multiple `poll_*` functions for different input modes (text input, filter, edit, conflict, branch creation). The main loop dispatches to the right one based on current app state.
 - Auto-refresh (2 sec timer) is disabled while any overlay is open.
-- `Overlay::Confirm` gates destructive operations (undo last commit, amend) behind a y/n dialog before proceeding.
+- `Overlay::Confirm` gates destructive operations (undo, amend, discard) behind a y/n dialog.
+- `Overlay` has many variants: Confirm, CommitInput, GitLog, StashList, BranchList, CommitDetail, Rebase. Each has its own key handler in `event.rs` and renderer in `popup.rs`.
+- Interactive rebase uses a temp script as `GIT_SEQUENCE_EDITOR` to drive `git rebase -i`.

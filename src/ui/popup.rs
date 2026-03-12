@@ -201,7 +201,17 @@ fn render_git_log(
     frame.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(format!(" Git Log ({} commits) [q/Esc to close] ", entries.len()))
+        .title(format!(" Git Log ({} commits) ", entries.len()))
+        .title_bottom(Line::from(vec![
+            Span::styled(" y", Style::default().fg(Color::Yellow)),
+            Span::styled(":yank hash  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(Color::Yellow)),
+            Span::styled(":view  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("r", Style::default().fg(Color::Yellow)),
+            Span::styled(":rebase  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("q/Esc", Style::default().fg(Color::Yellow)),
+            Span::styled(":close ", Style::default().fg(Color::DarkGray)),
+        ]))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 

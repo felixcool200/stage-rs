@@ -246,36 +246,6 @@ pub fn create_branch(repo: &Repository, name: &str) -> Result<()> {
 
 // ── Remote Operations ────────────────────────────────────────────────────────
 
-pub fn git_push(workdir: &Path) -> Result<String> {
-    let output = std::process::Command::new("git")
-        .args(["push"])
-        .current_dir(workdir)
-        .output()
-        .map_err(|e| eyre!("Failed to run git push: {e}"))?;
-    if output.status.success() {
-        let msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Ok(if msg.is_empty() { "Pushed successfully".into() } else { msg })
-    } else {
-        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(eyre!("{err}"))
-    }
-}
-
-pub fn git_pull(workdir: &Path) -> Result<String> {
-    let output = std::process::Command::new("git")
-        .args(["pull"])
-        .current_dir(workdir)
-        .output()
-        .map_err(|e| eyre!("Failed to run git pull: {e}"))?;
-    if output.status.success() {
-        let msg = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(if msg.is_empty() { "Pulled successfully".into() } else { msg })
-    } else {
-        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(eyre!("{err}"))
-    }
-}
-
 pub fn git_fetch(workdir: &Path) -> Result<String> {
     let output = std::process::Command::new("git")
         .args(["fetch", "--all"])

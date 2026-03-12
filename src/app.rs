@@ -129,9 +129,6 @@ pub enum Overlay {
         selected: usize,
         base_hash: String,
     },
-    RemoteMenu {
-        selected: usize,
-    },
 }
 
 #[derive(Debug, Clone)]
@@ -335,10 +332,6 @@ pub enum Message {
     StashApply,
     StashDrop,
     // Remote
-    OpenRemoteMenu,
-    RemoteAction,
-    GitPush,
-    GitPull,
     GitFetch,
     // Branches
     OpenBranchList,
@@ -799,48 +792,7 @@ impl App {
             }
 
             // ── Remote ────────────────────────────────────────────────────
-            Message::OpenRemoteMenu => {
-                self.overlay = Overlay::RemoteMenu { selected: 0 };
-            }
-            Message::RemoteAction => {
-                if let Overlay::RemoteMenu { selected } = &self.overlay {
-                    let action = *selected;
-                    self.overlay = Overlay::None;
-                    match action {
-                        0 => self.update(Message::GitFetch)?,
-                        1 => self.update(Message::GitPull)?,
-                        2 => self.update(Message::GitPush)?,
-                        _ => {}
-                    }
-                }
-            }
-            Message::GitPush => {
-                self.overlay = Overlay::None;
-                self.status_message = Some("Pushing...".into());
-                match self.repo.push() {
-                    Ok(msg) => {
-                        self.status_message = Some(format!("Push: {msg}"));
-                        self.refresh()?;
-                    }
-                    Err(e) => self.status_message = Some(format!("Push failed: {e}")),
-                }
-            }
-            Message::GitPull => {
-                self.overlay = Overlay::None;
-                self.status_message = Some("Pulling...".into());
-                match self.repo.pull() {
-                    Ok(msg) => {
-                        self.status_message = Some(format!("Pull: {msg}"));
-                        self.refresh()?;
-                        if self.diff_state.is_some() {
-                            self.load_selected_diff()?;
-                        }
-                    }
-                    Err(e) => self.status_message = Some(format!("Pull failed: {e}")),
-                }
-            }
             Message::GitFetch => {
-                self.overlay = Overlay::None;
                 self.status_message = Some("Fetching...".into());
                 match self.repo.fetch() {
                     Ok(msg) => {
@@ -1304,12 +1256,6 @@ impl App {
                 }
                 return;
             }
-            Overlay::RemoteMenu { selected } => {
-                if *selected > 0 {
-                    *selected -= 1;
-                }
-                return;
-            }
             Overlay::Confirm { .. } => return,
             Overlay::None => {}
         }
@@ -1378,12 +1324,6 @@ impl App {
             }
             Overlay::Rebase { entries, selected, .. } => {
                 if *selected < entries.len().saturating_sub(1) {
-                    *selected += 1;
-                }
-                return;
-            }
-            Overlay::RemoteMenu { selected } => {
-                if *selected < 2 {
                     *selected += 1;
                 }
                 return;

@@ -39,7 +39,6 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
             Overlay::StashList { .. } => handle_stash_list(key.code),
             Overlay::BranchList { .. } => handle_branch_list(key.code),
             Overlay::CommitDetail { .. } => handle_commit_detail(key.code),
-            Overlay::RemoteMenu { .. } => handle_remote_menu(key.code),
             Overlay::Rebase { .. } => handle_rebase(key.code, key.modifiers),
             Overlay::None => unreachable!(),
         });
@@ -131,20 +130,6 @@ fn handle_rebase(code: KeyCode, modifiers: KeyModifiers) -> Option<Message> {
         (KeyModifiers::SHIFT, KeyCode::Char('J')) => Some(Message::RebaseMoveDown),
         (KeyModifiers::SHIFT, KeyCode::Char('K')) => Some(Message::RebaseMoveUp),
         (_, KeyCode::Enter) => Some(Message::RebaseExecute),
-        _ => None,
-    }
-}
-
-fn handle_remote_menu(code: KeyCode) -> Option<Message> {
-    match code {
-        KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseOverlay),
-        KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
-        KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
-        KeyCode::Enter => Some(Message::RemoteAction),
-        // Direct shortcuts
-        KeyCode::Char('f') => Some(Message::GitFetch),
-        KeyCode::Char('l') => Some(Message::GitPull),
-        KeyCode::Char('p') => Some(Message::GitPush),
         _ => None,
     }
 }

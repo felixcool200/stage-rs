@@ -30,6 +30,9 @@ pub fn render(app: &App, frame: &mut Frame) {
         Overlay::CommitDetail { hash, message, diff_lines, scroll } => {
             render_commit_detail(frame, hash, message, diff_lines, *scroll);
         }
+        Overlay::RemoteMenu { selected } => {
+            render_remote_menu(frame, *selected);
+        }
         Overlay::Rebase { entries, selected, .. } => {
             render_rebase(frame, entries, *selected);
         }
@@ -380,6 +383,38 @@ fn render_stash_list(
                 ),
                 Span::styled(&e.message, Style::default().fg(Color::White)),
             ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_remote_menu(frame: &mut Frame, selected: usize) {
+    let area = centered_rect(40, 25, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Remote [Enter]run [f]etch [l]pull [p]ush [q]close ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Blue));
+
+    let items: Vec<ListItem> = ["  [f] Fetch", "  [l] Pull", "  [p] Push"]
+        .iter()
+        .map(|label| {
+            ListItem::new(Line::from(Span::styled(
+                *label,
+                Style::default().fg(Color::White),
+            )))
         })
         .collect();
 

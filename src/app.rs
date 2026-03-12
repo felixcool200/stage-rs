@@ -126,6 +126,9 @@ pub enum Overlay {
         selected: usize,
         base_hash: String,
     },
+    RemoteMenu {
+        selected: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -326,6 +329,8 @@ pub enum Message {
     StashApply,
     StashDrop,
     // Remote
+    OpenRemoteMenu,
+    RemoteAction,
     GitPush,
     GitPull,
     GitFetch,
@@ -761,7 +766,23 @@ impl App {
             }
 
             // ── Remote ────────────────────────────────────────────────────
+            Message::OpenRemoteMenu => {
+                self.overlay = Overlay::RemoteMenu { selected: 0 };
+            }
+            Message::RemoteAction => {
+                if let Overlay::RemoteMenu { selected } = &self.overlay {
+                    let action = *selected;
+                    self.overlay = Overlay::None;
+                    match action {
+                        0 => self.update(Message::GitFetch)?,
+                        1 => self.update(Message::GitPull)?,
+                        2 => self.update(Message::GitPush)?,
+                        _ => {}
+                    }
+                }
+            }
             Message::GitPush => {
+                self.overlay = Overlay::None;
                 self.status_message = Some("Pushing...".into());
                 match self.repo.push() {
                     Ok(msg) => {
@@ -772,6 +793,7 @@ impl App {
                 }
             }
             Message::GitPull => {
+                self.overlay = Overlay::None;
                 self.status_message = Some("Pulling...".into());
                 match self.repo.pull() {
                     Ok(msg) => {
@@ -785,6 +807,7 @@ impl App {
                 }
             }
             Message::GitFetch => {
+                self.overlay = Overlay::None;
                 self.status_message = Some("Fetching...".into());
                 match self.repo.fetch() {
                     Ok(msg) => {
@@ -1242,6 +1265,12 @@ impl App {
                 }
                 return;
             }
+            Overlay::RemoteMenu { selected } => {
+                if *selected > 0 {
+                    *selected -= 1;
+                }
+                return;
+            }
             Overlay::Confirm { .. } => return,
             Overlay::None => {}
         }
@@ -1315,6 +1344,12 @@ impl App {
             }
             Overlay::Rebase { entries, selected, .. } => {
                 if *selected < entries.len().saturating_sub(1) {
+                    *selected += 1;
+                }
+                return;
+            }
+            Overlay::RemoteMenu { selected } => {
+                if *selected < 2 {
                     *selected += 1;
                 }
                 return;

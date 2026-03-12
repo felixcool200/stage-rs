@@ -68,9 +68,7 @@ pub fn resolve(keymap: KeymapName, ctx: InputContext, key: KeyEvent) -> Option<M
         KeyCode::Char('b') => return Some(Message::OpenBranchList),
         KeyCode::Char('B') => return Some(Message::ToggleBlame),
         KeyCode::Char('R') => return Some(Message::OpenConflictResolver),
-        KeyCode::Char('P') => return Some(Message::GitPush),
-        KeyCode::Char('p') => return Some(Message::GitPull),
-        KeyCode::Char('F') => return Some(Message::GitFetch),
+        KeyCode::Char('P') => return Some(Message::OpenRemoteMenu),
         _ => {}
     }
 

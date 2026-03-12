@@ -285,7 +285,7 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            "  Space:actions  Enter:save  ←/Esc:back ".to_string(),
+            "  Space:actions  ↑/↓:navigate  ←/Esc:back ".to_string(),
             Style::default().fg(Color::DarkGray),
         ),
     ]);
@@ -307,27 +307,24 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
     let right_selected = matches!(section.resolution, ConflictResolution::Theirs | ConflictResolution::Both);
 
     // Colors depend on focus: bright when focused, dim when viewing from file list
-    // Selected = full bright color + tinted bg (opaque)
-    // Focused but not selected = faint text, no bg (transparent)
-    // Not focused = gray (dimmed)
     let (left_fg, left_border, left_bg) = if left_selected {
         (Color::Cyan, Color::Cyan, Color::Rgb(10, 40, 50))
     } else if focused {
-        (Color::Rgb(100, 100, 100), Color::Rgb(60, 60, 60), Color::Reset)
+        (Color::Rgb(100, 100, 100), Color::Rgb(70, 70, 70), Color::Rgb(15, 15, 15))
     } else {
         (Color::DarkGray, Color::DarkGray, Color::Reset)
     };
 
     let (right_fg, right_border, right_bg) = if right_selected {
-        (Color::Rgb(220, 120, 255), Color::Magenta, Color::Rgb(40, 10, 50))
+        (Color::Rgb(255, 100, 255), Color::Rgb(255, 100, 255), Color::Rgb(40, 10, 50))
     } else if focused {
-        (Color::Rgb(100, 100, 100), Color::Rgb(60, 60, 60), Color::Reset)
+        (Color::Rgb(100, 100, 100), Color::Rgb(70, 70, 70), Color::Rgb(15, 15, 15))
     } else {
         (Color::DarkGray, Color::DarkGray, Color::Reset)
     };
 
-    let left_title_fg = if left_selected { Color::Cyan } else if focused { Color::Rgb(100, 100, 100) } else { Color::DarkGray };
-    let right_title_fg = if right_selected { Color::Magenta } else if focused { Color::Rgb(100, 100, 100) } else { Color::DarkGray };
+    let left_title_fg = if focused || left_selected { Color::Cyan } else { Color::DarkGray };
+    let right_title_fg = if focused || right_selected { Color::Magenta } else { Color::DarkGray };
 
     // Left panel (ours / left branch)
     let left_block = Block::default()
@@ -350,8 +347,7 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
     let context_after: &[String] = &section.suffix;
 
     let context_style = Style::default().fg(Color::DarkGray);
-
-    let left_marker_style = Style::default().fg(if left_selected { Color::Cyan } else { Color::Rgb(60, 60, 60) });
+    let marker_style = Style::default().fg(Color::DarkGray);
 
     let mut left_lines: Vec<Line> = Vec::new();
     for l in context_before {
@@ -359,7 +355,7 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
     }
     for l in &section.ours {
         left_lines.push(Line::from(vec![
-            Span::styled("~ ", left_marker_style),
+            Span::styled("~ ", marker_style),
             Span::styled(l.to_string(), Style::default().fg(left_fg).bg(left_bg)),
         ]));
     }
@@ -393,15 +389,13 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
     let right_inner = right_block.inner(halves[1]);
     frame.render_widget(right_block, halves[1]);
 
-    let right_marker_style = Style::default().fg(if right_selected { Color::Magenta } else { Color::Rgb(60, 60, 60) });
-
     let mut right_lines: Vec<Line> = Vec::new();
     for l in context_before {
         right_lines.push(Line::from(Span::styled(format!("  {l}"), context_style)));
     }
     for l in &section.theirs {
         right_lines.push(Line::from(vec![
-            Span::styled("~ ", right_marker_style),
+            Span::styled("~ ", marker_style),
             Span::styled(l.to_string(), Style::default().fg(right_fg).bg(right_bg)),
         ]));
     }

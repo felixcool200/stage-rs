@@ -443,14 +443,9 @@ impl App {
                 entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
             }
             (Panel::DiffView, true) => {
-                entries.push(WhichKeyEntry { key: 's', label: "stage lines", message: StageLines });
-                entries.push(WhichKeyEntry { key: 'S', label: "stage file", message: StageFile });
-                entries.push(WhichKeyEntry { key: 'a', label: "select all", message: SelectAllLines });
-                entries.push(WhichKeyEntry { key: 'i', label: "edit", message: EnterEditMode });
-                entries.push(WhichKeyEntry { key: 'c', label: "commit", message: OpenCommit });
-                entries.push(WhichKeyEntry { key: 'C', label: "amend", message: OpenCommitAmend });
+                entries.push(WhichKeyEntry { key: 'a', label: "toggle all", message: SelectAllLines });
+                entries.push(WhichKeyEntry { key: 's', label: "stage selected", message: StageLines });
                 entries.push(WhichKeyEntry { key: 'y', label: "yank", message: YankToClipboard });
-                entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
             }
         }
         entries

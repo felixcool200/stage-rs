@@ -46,6 +46,12 @@ fn main() -> Result<()> {
 
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     loop {
+        // Update viewport height for scroll centering
+        if let Some(ds) = &mut app.diff_state {
+            let term_height = terminal.size()?.height as usize;
+            // body height = term_height - header(1) - footer(1), each diff panel has 2 border rows
+            ds.viewport_height = term_height.saturating_sub(4);
+        }
         terminal.draw(|frame| ui::render(app, frame))?;
 
         let branch_creating = matches!(app.overlay, Overlay::BranchList { creating: Some(_), .. });

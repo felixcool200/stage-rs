@@ -83,6 +83,8 @@ pub struct DiffState {
     pub hunk_changed_rows: Vec<usize>,
     /// Remembered line selection from the last ExitLineMode (hunk_index, selection, cursor)
     pub saved_line_selection: Option<(usize, BTreeSet<usize>, usize)>,
+    /// Last known viewport height (updated during render)
+    pub viewport_height: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -567,29 +569,30 @@ impl App {
                     if ds.hunks.is_empty() {
                         return Ok(());
                     }
-                    let hunk = &ds.hunks[ds.current_hunk];
-                    let changed = git::changed_rows_in_hunk(hunk, &ds.left_lines);
-                    if changed.is_empty() {
+                    // Collect all changed rows across all hunks
+                    let mut all_changed = Vec::new();
+                    for hunk in &ds.hunks {
+                        all_changed.extend(git::changed_rows_in_hunk(hunk, &ds.left_lines));
+                    }
+                    if all_changed.is_empty() {
                         return Ok(());
                     }
-                    // Restore saved selection if re-entering the same hunk
-                    let saved = ds.saved_line_selection.take();
-                    if let Some((saved_hunk, saved_sel, saved_cursor)) = saved {
-                        if saved_hunk == ds.current_hunk {
-                            ds.selected_lines = saved_sel;
-                            ds.cursor_line = saved_cursor;
-                        } else {
-                            ds.selected_lines.clear();
-                            ds.cursor_line = changed[0];
-                        }
+
+                    // Restore saved selection, or start at current hunk
+                    if let Some((_saved_hunk, saved_sel, saved_cursor)) = ds.saved_line_selection.take() {
+                        ds.selected_lines = saved_sel;
+                        ds.cursor_line = saved_cursor;
                     } else {
                         ds.selected_lines.clear();
-                        ds.cursor_line = changed[0];
+                        let hunk = &ds.hunks[ds.current_hunk];
+                        let hunk_rows = git::changed_rows_in_hunk(hunk, &ds.left_lines);
+                        ds.cursor_line = hunk_rows.first().copied().unwrap_or(all_changed[0]);
                     }
-                    ds.scroll = ds.cursor_line.saturating_sub(3);
-                    ds.hunk_changed_rows = changed;
+                    ds.hunk_changed_rows = all_changed;
                     ds.view_mode = DiffViewMode::LineNav;
                     self.status_message = None;
+                    // Center scroll on cursor
+                    self.center_diff_scroll();
                 }
             }
             Message::EnterEditMode => {
@@ -754,14 +757,12 @@ impl App {
             }
             Message::ExitLineMode => {
                 if let Some(ds) = &mut self.diff_state {
-                    // Save selection so re-entering the same hunk restores it
-                    if !ds.selected_lines.is_empty() {
-                        ds.saved_line_selection = Some((
-                            ds.current_hunk,
-                            ds.selected_lines.clone(),
-                            ds.cursor_line,
-                        ));
-                    }
+                    // Save selection so re-entering restores it
+                    ds.saved_line_selection = Some((
+                        ds.current_hunk,
+                        ds.selected_lines.clone(),
+                        ds.cursor_line,
+                    ));
                     ds.view_mode = DiffViewMode::HunkNav;
                     ds.selected_lines.clear();
                     ds.scroll = ds.hunks.get(ds.current_hunk)
@@ -1304,9 +1305,8 @@ impl App {
                 if let Some(pos) = ds.hunk_changed_rows.iter().position(|&r| r == ds.cursor_line) {
                     if pos > 0 {
                         ds.cursor_line = ds.hunk_changed_rows[pos - 1];
-                        if ds.cursor_line < ds.scroll {
-                            ds.scroll = ds.cursor_line;
-                        }
+                        Self::keep_cursor_visible(ds);
+                        Self::update_current_hunk_from_cursor(ds);
                     }
                 }
             }
@@ -1382,9 +1382,8 @@ impl App {
                 if let Some(pos) = ds.hunk_changed_rows.iter().position(|&r| r == ds.cursor_line) {
                     if pos < ds.hunk_changed_rows.len() - 1 {
                         ds.cursor_line = ds.hunk_changed_rows[pos + 1];
-                        if ds.cursor_line >= ds.scroll + 20 {
-                            ds.scroll = ds.cursor_line.saturating_sub(10);
-                        }
+                        Self::keep_cursor_visible(ds);
+                        Self::update_current_hunk_from_cursor(ds);
                     }
                 }
             }
@@ -1503,6 +1502,34 @@ impl App {
         None
     }
 
+    /// Scroll the diff view so cursor_line is roughly 1/3 from the top.
+    fn center_diff_scroll(&mut self) {
+        if let Some(ds) = &mut self.diff_state {
+            let offset = ds.viewport_height / 3;
+            ds.scroll = ds.cursor_line.saturating_sub(offset);
+        }
+    }
+
+    /// Scroll just enough to keep cursor_line visible, placing it 1/3 from top/bottom edge.
+    fn keep_cursor_visible(ds: &mut DiffState) {
+        let margin = ds.viewport_height / 3;
+        if ds.cursor_line < ds.scroll + margin {
+            ds.scroll = ds.cursor_line.saturating_sub(margin);
+        } else if ds.cursor_line >= ds.scroll + ds.viewport_height.saturating_sub(margin) {
+            ds.scroll = ds.cursor_line.saturating_sub(ds.viewport_height.saturating_sub(margin).saturating_sub(1));
+        }
+    }
+
+    /// Update current_hunk to match whichever hunk the cursor is inside.
+    fn update_current_hunk_from_cursor(ds: &mut DiffState) {
+        for (i, hunk) in ds.hunks.iter().enumerate() {
+            if ds.cursor_line >= hunk.display_start && ds.cursor_line < hunk.display_end {
+                ds.current_hunk = i;
+                return;
+            }
+        }
+    }
+
     fn load_selected_diff(&mut self) -> Result<()> {
         if let Some(entry) = self.file_entries.get(self.selected_index) {
             let path = entry.path.clone();
@@ -1526,6 +1553,7 @@ impl App {
                         .map(|h| h.display_start)
                         .unwrap_or(0);
                     let prev_saved = prev.and_then(|ds| ds.saved_line_selection.clone());
+                    let prev_viewport = prev.map(|ds| ds.viewport_height).unwrap_or(24);
                     self.diff_state = Some(DiffState {
                         file_path: path,
                         left_lines,
@@ -1541,6 +1569,7 @@ impl App {
                         selected_lines: prev_selected,
                         hunk_changed_rows: prev_hunk_rows,
                         saved_line_selection: prev_saved,
+                        viewport_height: prev_viewport,
                     });
                 }
                 Err(_) => {

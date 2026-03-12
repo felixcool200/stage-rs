@@ -49,27 +49,7 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
 
             // Show selection indicator in line mode
             if ds.view_mode == DiffViewMode::LineNav && dl.hunk_index.is_some() {
-                let is_selected = ds.selected_lines.contains(&i);
-                let is_cursor = i == ds.cursor_line;
-                let marker = if is_selected && is_cursor {
-                    Span::styled(
-                        "[x]",
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    )
-                } else if is_selected {
-                    Span::styled(
-                        "[x]",
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-                    )
-                } else if is_cursor {
-                    Span::styled(
-                        "[ ]",
-                        Style::default().fg(Color::Yellow),
-                    )
-                } else {
-                    Span::styled("   ", Style::default())
-                };
-                spans.push(marker);
+                spans.push(line_mode_marker(ds, i));
             }
             spans.push(Span::styled(line_num, num_style));
             push_highlighted_content(app, &dl.content, &dl.kind, text_style, &mut spans);
@@ -108,7 +88,8 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
                 DiffViewMode::LineNav => {
                     let sel = ds.selected_lines.len();
                     let total = ds.hunk_changed_rows.len();
-                    format!(" [line mode: {sel}/{total} selected]")
+                    format!(" [line {sel}/{total} selected | hunk {}/{}]",
+                            ds.current_hunk + 1, ds.hunks.len())
                 }
                 _ => String::new(),
             };
@@ -144,27 +125,7 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
             let mut spans = Vec::new();
             // Show selection indicator in line mode
             if ds.view_mode == DiffViewMode::LineNav && dl.hunk_index.is_some() {
-                let is_selected = ds.selected_lines.contains(&i);
-                let is_cursor = i == ds.cursor_line;
-                let marker = if is_selected && is_cursor {
-                    Span::styled(
-                        "[x]",
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    )
-                } else if is_selected {
-                    Span::styled(
-                        "[x]",
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-                    )
-                } else if is_cursor {
-                    Span::styled(
-                        "[ ]",
-                        Style::default().fg(Color::Yellow),
-                    )
-                } else {
-                    Span::styled("   ", Style::default())
-                };
-                spans.push(marker);
+                spans.push(line_mode_marker(ds, i));
             }
             spans.push(Span::styled(line_num, num_style));
             push_highlighted_content(app, &dl.content, &dl.kind, text_style, &mut spans);
@@ -443,7 +404,7 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 
 fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight) -> (Style, Style) {
     let (bg, change_bg_boost) = match highlight {
-        LineHighlight::CursorLine => (Color::Rgb(50, 50, 20), true),
+        LineHighlight::CursorLine => (Color::Rgb(60, 55, 20), true),
         LineHighlight::SelectedLine => (Color::Rgb(20, 50, 20), true),
         LineHighlight::CurrentHunk => (Color::Rgb(30, 30, 50), true),
         LineHighlight::None => (Color::Reset, false),
@@ -474,5 +435,32 @@ fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight) -> (Style, Style)
             Style::default().fg(Color::DarkGray).bg(bg),
             Style::default().fg(Color::DarkGray).bg(bg),
         ),
+    }
+}
+
+/// Produce the 2-char selection marker for line-by-line mode.
+fn line_mode_marker(ds: &DiffState, row: usize) -> Span<'static> {
+    let is_selected = ds.selected_lines.contains(&row);
+    let is_cursor = row == ds.cursor_line;
+    match (is_cursor, is_selected) {
+        (true, true) => Span::styled(
+            ">>",
+            Style::default()
+                .fg(Color::Rgb(255, 200, 60))
+                .add_modifier(Modifier::BOLD),
+        ),
+        (true, false) => Span::styled(
+            "> ",
+            Style::default()
+                .fg(Color::Rgb(255, 200, 60))
+                .add_modifier(Modifier::BOLD),
+        ),
+        (false, true) => Span::styled(
+            " +",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
+        (false, false) => Span::styled("  ", Style::default()),
     }
 }

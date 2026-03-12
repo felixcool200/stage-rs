@@ -7,10 +7,10 @@ use color_eyre::Result;
 use git2::Repository;
 use std::path::Path;
 
-pub use diff::{apply_hunk, apply_lines, changed_rows_in_hunk, compute_diff, DiffLine, DiffLineKind, Hunk, LinePair};
+pub use diff::{apply_hunk, apply_lines, changed_rows_in_hunk, compute_diff, DiffLine, DiffLineKind, Hunk};
 pub use log::{BlameLine, LogEntry};
 pub use operations::{BranchEntry, StashEntry};
-pub use status::{ChangeKind, FileEntry, FileStatus};
+pub use status::{FileEntry, FileStatus};
 
 pub struct GitRepo {
     pub repo: Repository,

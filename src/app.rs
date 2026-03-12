@@ -1,4 +1,4 @@
-use crate::git::{self, BlameLine, BranchEntry, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair, LogEntry, StashEntry};
+use crate::git::{self, BlameLine, BranchEntry, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LogEntry, StashEntry};
 use crate::syntax::Highlighter;
 use color_eyre::Result;
 use std::collections::BTreeSet;
@@ -67,7 +67,6 @@ pub struct DiffState {
     pub file_path: String,
     pub left_lines: Vec<DiffLine>,
     pub right_lines: Vec<DiffLine>,
-    pub line_mapping: Vec<LinePair>,
     pub hunks: Vec<Hunk>,
     pub current_hunk: usize,
     pub scroll: usize,
@@ -1479,7 +1478,7 @@ impl App {
             let staged = matches!(entry.status, FileStatus::Staged(_));
             match self.repo.get_diff_content(&path, staged) {
                 Ok((old, new)) => {
-                    let (left_lines, right_lines, line_mapping, hunks) =
+                    let (left_lines, right_lines, hunks) =
                         git::compute_diff(&old, &new);
                     let max_scroll = left_lines.len().max(right_lines.len());
                     let prev_hunk = self
@@ -1496,7 +1495,6 @@ impl App {
                         file_path: path,
                         left_lines,
                         right_lines,
-                        line_mapping,
                         hunks,
                         current_hunk: prev_hunk,
                         scroll,

@@ -20,12 +20,6 @@ pub enum DiffLineKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct LinePair {
-    pub left: Option<usize>,
-    pub right: Option<usize>,
-}
-
-#[derive(Debug, Clone)]
 pub struct Hunk {
     pub display_start: usize,
     pub display_end: usize, // exclusive
@@ -78,15 +72,14 @@ fn get_head_content(repo: &Repository, path: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(blob.content()).to_string())
 }
 
-/// Compute side-by-side diff lines, line mapping, and hunks.
+/// Compute side-by-side diff lines and hunks.
 pub fn compute_diff(
     old: &str,
     new: &str,
-) -> (Vec<DiffLine>, Vec<DiffLine>, Vec<LinePair>, Vec<Hunk>) {
+) -> (Vec<DiffLine>, Vec<DiffLine>, Vec<Hunk>) {
     let diff = TextDiff::from_lines(old, new);
     let mut left_lines = Vec::new();
     let mut right_lines = Vec::new();
-    let mut mapping = Vec::new();
     let mut hunks = Vec::new();
 
     let mut current_hunk_start: Option<usize> = None;
@@ -106,8 +99,6 @@ pub fn compute_diff(
                     hunk_index += 1;
                 }
 
-                let li = left_lines.len();
-                let ri = right_lines.len();
                 left_lines.push(DiffLine {
                     content: text.clone(),
                     kind: DiffLineKind::Equal,
@@ -118,17 +109,12 @@ pub fn compute_diff(
                     kind: DiffLineKind::Equal,
                     hunk_index: None,
                 });
-                mapping.push(LinePair {
-                    left: Some(li),
-                    right: Some(ri),
-                });
             }
             ChangeTag::Delete => {
                 if current_hunk_start.is_none() {
                     current_hunk_start = Some(display_row);
                 }
 
-                let li = left_lines.len();
                 left_lines.push(DiffLine {
                     content: text,
                     kind: DiffLineKind::Removed,
@@ -139,17 +125,12 @@ pub fn compute_diff(
                     kind: DiffLineKind::Spacer,
                     hunk_index: Some(hunk_index),
                 });
-                mapping.push(LinePair {
-                    left: Some(li),
-                    right: None,
-                });
             }
             ChangeTag::Insert => {
                 if current_hunk_start.is_none() {
                     current_hunk_start = Some(display_row);
                 }
 
-                let ri = right_lines.len();
                 left_lines.push(DiffLine {
                     content: String::new(),
                     kind: DiffLineKind::Spacer,
@@ -159,10 +140,6 @@ pub fn compute_diff(
                     content: text,
                     kind: DiffLineKind::Added,
                     hunk_index: Some(hunk_index),
-                });
-                mapping.push(LinePair {
-                    left: None,
-                    right: Some(ri),
                 });
             }
         }
@@ -175,7 +152,7 @@ pub fn compute_diff(
         });
     }
 
-    (left_lines, right_lines, mapping, hunks)
+    (left_lines, right_lines, hunks)
 }
 
 /// Apply only the specified hunk to the index content, producing a new file.
@@ -294,7 +271,7 @@ mod tests {
         let old = "a\nb\nc\nd\ne\n";
         let new = "a\nB\nc\nd\nE\n";
 
-        let (_, _, _, hunks) = compute_diff(old, new);
+        let (_, _, hunks) = compute_diff(old, new);
         assert_eq!(hunks.len(), 2);
     }
 

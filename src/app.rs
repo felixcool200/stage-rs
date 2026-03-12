@@ -78,6 +78,12 @@ pub enum Overlay {
         selected: usize,
         creating: Option<String>,
     },
+    CommitDetail {
+        hash: String,
+        message: String,
+        diff_lines: Vec<String>,
+        scroll: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -246,6 +252,7 @@ pub enum Message {
     OpenCommitAmend,
     UndoLastCommit,
     OpenGitLog,
+    ViewCommitDetail,
     // Overlay actions (handled by overlay key routing, not keymap)
     CloseOverlay,
     ConfirmCommit,
@@ -719,6 +726,28 @@ impl App {
                     }
                 }
             }
+            Message::ViewCommitDetail => {
+                if let Overlay::GitLog { entries, selected, .. } = &self.overlay {
+                    if let Some(entry) = entries.get(*selected) {
+                        let hash = entry.hash.clone();
+                        let message = entry.message.clone();
+                        match self.repo.get_commit_diff(&hash) {
+                            Ok(diff_text) => {
+                                let diff_lines: Vec<String> = diff_text.lines().map(String::from).collect();
+                                self.overlay = Overlay::CommitDetail {
+                                    hash,
+                                    message,
+                                    diff_lines,
+                                    scroll: 0,
+                                };
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Diff failed: {e}"));
+                            }
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -789,6 +818,10 @@ impl App {
                 return;
             }
             Overlay::BranchList { .. } => return,
+            Overlay::CommitDetail { scroll, .. } => {
+                *scroll = scroll.saturating_sub(1);
+                return;
+            }
             Overlay::Confirm { .. } => return,
             Overlay::None => {}
         }
@@ -854,6 +887,12 @@ impl App {
                 return;
             }
             Overlay::BranchList { .. } => return,
+            Overlay::CommitDetail { diff_lines, scroll, .. } => {
+                if *scroll < diff_lines.len().saturating_sub(1) {
+                    *scroll += 1;
+                }
+                return;
+            }
             Overlay::Confirm { .. } => return,
             Overlay::None => {}
         }

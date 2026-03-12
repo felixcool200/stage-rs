@@ -27,6 +27,9 @@ pub fn render(app: &App, frame: &mut Frame) {
         Overlay::BranchList { entries, selected, creating } => {
             render_branch_list(frame, entries, *selected, creating.as_deref());
         }
+        Overlay::CommitDetail { hash, message, diff_lines, scroll } => {
+            render_commit_detail(frame, hash, message, diff_lines, *scroll);
+        }
     }
 }
 
@@ -254,6 +257,48 @@ fn render_branch_list(
     let mut state = ListState::default();
     state.select(Some(selected));
     frame.render_stateful_widget(list, inner, &mut state);
+}
+
+fn render_commit_detail(
+    frame: &mut Frame,
+    hash: &str,
+    message: &str,
+    diff_lines: &[String],
+    scroll: usize,
+) {
+    let area = centered_rect(85, 80, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(format!(" {hash} - {message} [q/Esc to close, j/k to scroll] "))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let visible_height = inner.height as usize;
+    let lines: Vec<Line> = diff_lines
+        .iter()
+        .skip(scroll)
+        .take(visible_height)
+        .map(|line| {
+            let (color, prefix_style) = if line.starts_with('+') {
+                (Color::Green, Color::Green)
+            } else if line.starts_with('-') {
+                (Color::Red, Color::Red)
+            } else if line.starts_with("@@") {
+                (Color::Cyan, Color::Cyan)
+            } else {
+                (Color::White, Color::DarkGray)
+            };
+            let _ = prefix_style;
+            Line::from(Span::styled(line.as_str(), Style::default().fg(color)))
+        })
+        .collect();
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, inner);
 }
 
 fn render_stash_list(

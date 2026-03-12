@@ -40,6 +40,40 @@ pub fn get_log(repo: &Repository, max_count: usize) -> Result<Vec<LogEntry>> {
     Ok(entries)
 }
 
+/// Get the diff for a specific commit as a string.
+pub fn get_commit_diff(repo: &Repository, hash: &str) -> Result<String> {
+    let oid = git2::Oid::from_str(hash)
+        .or_else(|_| {
+            // Try partial match
+            let obj = repo.revparse_single(hash)?;
+            Ok(obj.id())
+        })
+        .map_err(|e: git2::Error| color_eyre::eyre::eyre!("Cannot find commit: {e}"))?;
+    let commit = repo.find_commit(oid)?;
+    let tree = commit.tree()?;
+    let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
+
+    let mut output = String::new();
+    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        let prefix = match line.origin() {
+            '+' => "+",
+            '-' => "-",
+            'H' => "@@",
+            'F' => "--- ",
+            _ => " ",
+        };
+        if line.origin() == 'H' || line.origin() == 'F' {
+            output.push_str(prefix);
+        } else {
+            output.push_str(prefix);
+        }
+        output.push_str(&String::from_utf8_lossy(line.content()));
+        true
+    })?;
+    Ok(output)
+}
+
 fn format_timestamp(secs: i64) -> String {
     // Simple timestamp formatting without chrono dependency
     // Unix epoch: 1970-01-01

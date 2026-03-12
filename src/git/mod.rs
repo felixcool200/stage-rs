@@ -78,6 +78,10 @@ impl GitRepo {
         log::get_log(&self.repo, max_count)
     }
 
+    pub fn get_commit_diff(&self, hash: &str) -> Result<String> {
+        log::get_commit_diff(&self.repo, hash)
+    }
+
     pub fn workdir(&self) -> &Path {
         self.repo.workdir().expect("bare repositories not supported")
     }

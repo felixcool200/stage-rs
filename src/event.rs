@@ -38,6 +38,7 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
             Overlay::GitLog { .. } => handle_git_log(key.code),
             Overlay::StashList { .. } => handle_stash_list(key.code),
             Overlay::BranchList { .. } => handle_branch_list(key.code),
+            Overlay::CommitDetail { .. } => handle_commit_detail(key.code),
             Overlay::None => unreachable!(),
         });
     }
@@ -113,6 +114,16 @@ fn handle_git_log(code: KeyCode) -> Option<Message> {
         KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
         KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
         KeyCode::Char('y') => Some(Message::YankToClipboard),
+        KeyCode::Enter => Some(Message::ViewCommitDetail),
+        _ => None,
+    }
+}
+
+fn handle_commit_detail(code: KeyCode) -> Option<Message> {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseOverlay),
+        KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
+        KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
         _ => None,
     }
 }

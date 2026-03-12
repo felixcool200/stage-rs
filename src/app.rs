@@ -1,4 +1,5 @@
 use crate::git::{self, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair};
+use crate::keymap::KeymapName;
 use color_eyre::Result;
 use std::collections::BTreeSet;
 use std::time::Instant;
@@ -13,6 +14,7 @@ pub struct App {
     pub should_quit: bool,
     pub status_message: Option<String>,
     pub last_refresh: Instant,
+    pub keymap: KeymapName,
 }
 
 pub struct DiffState {
@@ -62,11 +64,12 @@ pub enum Message {
     ToggleLine,
     StageLines,
     SelectAllLines,
+    CycleKeymap,
     Quit,
 }
 
 impl App {
-    pub fn new(path: &str) -> Result<Self> {
+    pub fn new(path: &str, keymap: KeymapName) -> Result<Self> {
         let repo = GitRepo::open(path)?;
         let branch_name = repo.branch_name();
         let file_entries = repo.get_file_statuses()?;
@@ -81,6 +84,7 @@ impl App {
             should_quit: false,
             status_message: None,
             last_refresh: Instant::now(),
+            keymap,
         })
     }
 
@@ -169,8 +173,10 @@ impl App {
                     ds.hunk_changed_rows = changed;
                     ds.selected_lines.clear();
                     ds.view_mode = DiffViewMode::LineNav;
-                    self.status_message =
-                        Some("Line mode: j/k navigate, Space toggle, s stage selected, a select all, Esc back".into());
+                    self.status_message = Some(match self.keymap {
+                        KeymapName::Vim => "Line mode: j/k navigate, Space toggle, a all, s stage, Esc back".into(),
+                        KeymapName::Helix => "Line mode: j/k navigate, x toggle, X all, s stage, Esc back".into(),
+                    });
                 }
             }
             Message::ExitLineMode => {
@@ -210,6 +216,11 @@ impl App {
             }
             Message::StageLines => {
                 self.stage_selected_lines()?;
+            }
+            Message::CycleKeymap => {
+                self.keymap = self.keymap.cycle();
+                self.status_message =
+                    Some(format!("Keymap: {}", self.keymap.label()));
             }
         }
         Ok(())

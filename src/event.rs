@@ -1,6 +1,7 @@
 use crate::app::{App, DiffViewMode, Message, Panel};
+use crate::keymap::{self, InputContext};
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event};
 use std::time::Duration;
 
 const AUTO_REFRESH_SECS: u64 = 2;
@@ -26,12 +27,8 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
         return Ok(None);
     }
 
-    if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('c') {
-        return Ok(Some(Message::Quit));
-    }
-
-    match app.active_panel {
-        Panel::FileList => Ok(handle_file_list(key)),
+    let ctx = match app.active_panel {
+        Panel::FileList => InputContext::FileList,
         Panel::DiffView => {
             let in_line_mode = app
                 .diff_state
@@ -39,55 +36,12 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
                 .map(|ds| ds.view_mode == DiffViewMode::LineNav)
                 .unwrap_or(false);
             if in_line_mode {
-                Ok(handle_line_mode(key))
+                InputContext::DiffLineNav
             } else {
-                Ok(handle_diff_view(key))
+                InputContext::DiffHunkNav
             }
         }
-    }
-}
+    };
 
-fn handle_file_list(key: KeyEvent) -> Option<Message> {
-    match key.code {
-        KeyCode::Char('q') => Some(Message::Quit),
-        KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
-        KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
-        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Message::SelectFile),
-        KeyCode::Tab => Some(Message::SwitchPanel),
-        KeyCode::Char('s') => Some(Message::StageFile),
-        KeyCode::Char('u') => Some(Message::UnstageFile),
-        KeyCode::Char('d') => Some(Message::DiscardChanges),
-        KeyCode::Char('r') => Some(Message::Refresh),
-        _ => None,
-    }
-}
-
-fn handle_diff_view(key: KeyEvent) -> Option<Message> {
-    match key.code {
-        KeyCode::Char('q') => Some(Message::Quit),
-        KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
-        KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
-        KeyCode::Tab | KeyCode::Char('h') | KeyCode::Left => Some(Message::SwitchPanel),
-        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => Some(Message::EnterLineMode),
-        KeyCode::Char('s') => Some(Message::StageHunk),
-        KeyCode::Char('S') => Some(Message::StageFile),
-        KeyCode::Char('u') => Some(Message::UnstageFile),
-        KeyCode::Char('r') => Some(Message::Refresh),
-        _ => None,
-    }
-}
-
-fn handle_line_mode(key: KeyEvent) -> Option<Message> {
-    match key.code {
-        KeyCode::Char('q') => Some(Message::Quit),
-        KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
-        KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
-        KeyCode::Char(' ') => Some(Message::ToggleLine),
-        KeyCode::Char('a') => Some(Message::SelectAllLines),
-        KeyCode::Char('s') => Some(Message::StageLines),
-        KeyCode::Char('S') => Some(Message::StageFile),
-        KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => Some(Message::ExitLineMode),
-        KeyCode::Char('r') => Some(Message::Refresh),
-        _ => None,
-    }
+    Ok(keymap::resolve(app.keymap, ctx, key))
 }

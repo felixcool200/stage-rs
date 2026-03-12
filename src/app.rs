@@ -53,6 +53,10 @@ pub enum DiffViewMode {
 
 pub enum Overlay {
     None,
+    Confirm {
+        message: String,
+        action: PendingAction,
+    },
     CommitInput {
         input: TextInput,
         amend: bool,
@@ -62,6 +66,12 @@ pub enum Overlay {
         selected: usize,
         scroll: usize,
     },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PendingAction {
+    CommitAmend,
+    UndoLastCommit,
 }
 
 impl Overlay {
@@ -207,6 +217,7 @@ pub enum Message {
     // Overlay actions (handled by overlay key routing, not keymap)
     CloseOverlay,
     ConfirmCommit,
+    ConfirmAction,
     Quit,
 }
 
@@ -385,29 +396,51 @@ impl App {
                 };
             }
             Message::OpenCommitAmend => {
-                let initial = self.repo.last_commit_message().unwrap_or_default();
-                self.overlay = Overlay::CommitInput {
-                    input: TextInput::new(&initial),
-                    amend: true,
+                self.overlay = Overlay::Confirm {
+                    message: "Amend the last commit? This will rewrite history.".into(),
+                    action: PendingAction::CommitAmend,
                 };
             }
             Message::ConfirmCommit => {
                 self.do_commit()?;
             }
-            Message::UndoLastCommit => {
-                match self.repo.undo_last_commit() {
-                    Ok(msg) => {
-                        self.status_message = Some("Undone last commit (message saved)".into());
-                        self.saved_commit_msg = Some(msg);
-                        self.refresh()?;
-                        if self.diff_state.is_some() {
-                            self.load_selected_diff()?;
+            Message::ConfirmAction => {
+                let action = match &self.overlay {
+                    Overlay::Confirm { action, .. } => *action,
+                    _ => return Ok(()),
+                };
+                self.overlay = Overlay::None;
+                match action {
+                    PendingAction::CommitAmend => {
+                        let initial = self.repo.last_commit_message().unwrap_or_default();
+                        self.overlay = Overlay::CommitInput {
+                            input: TextInput::new(&initial),
+                            amend: true,
+                        };
+                    }
+                    PendingAction::UndoLastCommit => {
+                        match self.repo.undo_last_commit() {
+                            Ok(msg) => {
+                                self.status_message =
+                                    Some("Undone last commit (message saved)".into());
+                                self.saved_commit_msg = Some(msg);
+                                self.refresh()?;
+                                if self.diff_state.is_some() {
+                                    self.load_selected_diff()?;
+                                }
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Undo failed: {e}"));
+                            }
                         }
                     }
-                    Err(e) => {
-                        self.status_message = Some(format!("Undo failed: {e}"));
-                    }
                 }
+            }
+            Message::UndoLastCommit => {
+                self.overlay = Overlay::Confirm {
+                    message: "Undo the last commit? Changes will be unstaged.".into(),
+                    action: PendingAction::UndoLastCommit,
+                };
             }
             Message::OpenGitLog => {
                 match self.repo.get_log(100) {
@@ -480,6 +513,7 @@ impl App {
                 input.move_up();
                 return;
             }
+            Overlay::Confirm { .. } => return,
             Overlay::None => {}
         }
 
@@ -531,6 +565,7 @@ impl App {
                 input.move_down();
                 return;
             }
+            Overlay::Confirm { .. } => return,
             Overlay::None => {}
         }
 

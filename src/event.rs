@@ -33,6 +33,7 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
     // Route to overlay handlers when active
     if app.overlay.is_active() {
         return Ok(match &app.overlay {
+            Overlay::Confirm { .. } => handle_confirm(key.code),
             Overlay::CommitInput { .. } => handle_commit_input(key.modifiers, key.code),
             Overlay::GitLog { .. } => handle_git_log(key.code),
             Overlay::None => unreachable!(),
@@ -70,6 +71,14 @@ fn handle_commit_input(modifiers: KeyModifiers, code: KeyCode) -> Option<Message
         }
         (_, KeyCode::Esc) => Some(Message::CloseOverlay),
         _ => None, // Text editing keys handled separately
+    }
+}
+
+fn handle_confirm(code: KeyCode) -> Option<Message> {
+    match code {
+        KeyCode::Char('y') | KeyCode::Enter => Some(Message::ConfirmAction),
+        KeyCode::Char('n') | KeyCode::Esc => Some(Message::CloseOverlay),
+        _ => None,
     }
 }
 

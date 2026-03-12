@@ -8,6 +8,9 @@ use ratatui::Frame;
 pub fn render(app: &App, frame: &mut Frame) {
     match &app.overlay {
         Overlay::None => {}
+        Overlay::Confirm { message, .. } => {
+            render_confirm(frame, message);
+        }
         Overlay::CommitInput { input, amend } => {
             render_commit_input(frame, input, *amend);
         }
@@ -19,6 +22,37 @@ pub fn render(app: &App, frame: &mut Frame) {
             render_git_log(frame, entries, *selected, *scroll);
         }
     }
+}
+
+fn render_confirm(frame: &mut Frame, message: &str) {
+    let area = centered_rect(50, 20, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Confirm ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            message,
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" [y/Enter] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("Yes  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" [n/Esc] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled("No", Style::default().fg(Color::DarkGray)),
+        ]),
+    ];
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, inner);
 }
 
 fn render_commit_input(

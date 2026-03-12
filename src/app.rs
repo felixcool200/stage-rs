@@ -1,5 +1,6 @@
 use crate::git::{self, BlameLine, BranchEntry, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair, LogEntry, StashEntry};
 use crate::keymap::KeymapName;
+use crate::syntax::Highlighter;
 use color_eyre::Result;
 use std::collections::BTreeSet;
 use std::time::Instant;
@@ -28,6 +29,8 @@ pub struct App {
     pub edit_state: Option<EditState>,
     /// Conflict resolver state
     pub conflict_state: Option<ConflictState>,
+    /// Syntax highlighter
+    pub highlighter: Highlighter,
 }
 
 pub struct ConflictState {
@@ -386,6 +389,7 @@ impl App {
             show_blame: false,
             edit_state: None,
             conflict_state: None,
+            highlighter: Highlighter::new(),
         })
     }
 

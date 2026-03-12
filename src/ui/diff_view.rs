@@ -1,5 +1,6 @@
 use crate::app::{App, ConflictResolution, ConflictState, DiffViewMode, Panel};
 use crate::git::DiffLineKind;
+use crate::syntax;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -64,7 +65,7 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
                 spans.push(marker);
             }
             spans.push(Span::styled(line_num, num_style));
-            spans.push(Span::styled(&dl.content, text_style));
+            push_highlighted_content(app, &dl.content, &dl.kind, text_style, &mut spans);
             Line::from(spans)
         })
         .collect();
@@ -172,7 +173,7 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
                 spans.push(marker);
             }
             spans.push(Span::styled(line_num, num_style));
-            spans.push(Span::styled(&dl.content, text_style));
+            push_highlighted_content(app, &dl.content, &dl.kind, text_style, &mut spans);
             Line::from(spans)
         })
         .collect();
@@ -306,6 +307,34 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, area: Rect) {
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
+}
+
+/// Push syntax-highlighted spans for a line's content, falling back to a single styled span.
+fn push_highlighted_content<'a>(
+    app: &App,
+    content: &'a str,
+    kind: &DiffLineKind,
+    fallback_style: Style,
+    spans: &mut Vec<Span<'a>>,
+) {
+    // Don't highlight spacer lines or empty content
+    if *kind == DiffLineKind::Spacer || content.is_empty() {
+        spans.push(Span::styled(content, fallback_style));
+        return;
+    }
+
+    // Try syntax highlighting based on file extension
+    if let Some(ds) = &app.diff_state {
+        if let Some(ext) = syntax::file_extension(&ds.file_path) {
+            let bg = fallback_style.bg.unwrap_or(Color::Reset);
+            if let Some(highlighted) = app.highlighter.highlight_line(content, ext, bg) {
+                spans.extend(highlighted);
+                return;
+            }
+        }
+    }
+
+    spans.push(Span::styled(content, fallback_style));
 }
 
 fn truncate_str(s: &str, max_len: usize) -> String {

@@ -2,6 +2,7 @@ mod app;
 mod event;
 mod git;
 mod keymap;
+mod syntax;
 mod ui;
 
 use app::{App, Overlay};

@@ -444,6 +444,11 @@ fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight) -> (Style, Style)
 fn line_mode_marker(ds: &DiffState, row: usize) -> Span<'static> {
     let is_selected = ds.selected_lines.contains(&row);
     let is_cursor = row == ds.cursor_line;
+    let (mark, mark_color) = if ds.is_staged {
+        ("-", Color::Red)
+    } else {
+        ("+", Color::Green)
+    };
     match (is_cursor, is_selected) {
         (true, true) => Span::styled(
             ">>",
@@ -458,9 +463,9 @@ fn line_mode_marker(ds: &DiffState, row: usize) -> Span<'static> {
                 .add_modifier(Modifier::BOLD),
         ),
         (false, true) => Span::styled(
-            " +",
+            format!(" {mark}"),
             Style::default()
-                .fg(Color::Green)
+                .fg(mark_color)
                 .add_modifier(Modifier::BOLD),
         ),
         (false, false) => Span::styled("  ", Style::default()),

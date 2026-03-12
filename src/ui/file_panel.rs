@@ -62,12 +62,31 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             String::new()
         };
 
-        items.push(ListItem::new(Line::from(vec![
+        let mut spans = vec![
             Span::raw("  "),
             Span::styled(format!("{label} "), Style::default().fg(status_color)),
             Span::styled(filename, Style::default().fg(Color::White)),
             Span::styled(dir, Style::default().fg(Color::DarkGray)),
-        ])));
+        ];
+        if entry.insertions > 0 || entry.deletions > 0 {
+            spans.push(Span::styled(" ", Style::default()));
+            if entry.insertions > 0 {
+                spans.push(Span::styled(
+                    format!("+{}", entry.insertions),
+                    Style::default().fg(Color::Green),
+                ));
+            }
+            if entry.deletions > 0 {
+                if entry.insertions > 0 {
+                    spans.push(Span::styled(" ", Style::default()));
+                }
+                spans.push(Span::styled(
+                    format!("-{}", entry.deletions),
+                    Style::default().fg(Color::Red),
+                ));
+            }
+        }
+        items.push(ListItem::new(Line::from(spans)));
         list_index_to_entry.push(Some(i));
     }
 

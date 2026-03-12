@@ -305,8 +305,8 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, area: Rect) {
     let left_selected = matches!(section.resolution, ConflictResolution::Ours | ConflictResolution::Both);
     let right_selected = matches!(section.resolution, ConflictResolution::Theirs | ConflictResolution::Both);
 
-    let left_border_color = if left_selected { Color::Cyan } else { Color::DarkGray };
-    let right_border_color = if right_selected { Color::Magenta } else { Color::DarkGray };
+    let left_border_color = if left_selected { Color::Cyan } else { Color::Rgb(60, 100, 110) };
+    let right_border_color = if right_selected { Color::Magenta } else { Color::Rgb(100, 60, 110) };
 
     // Left panel (ours / left branch)
     let left_block = Block::default()
@@ -333,7 +333,7 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, area: Rect) {
     let left_bg = if left_selected {
         Color::Rgb(10, 40, 50)
     } else {
-        Color::Reset
+        Color::Rgb(5, 20, 25)
     };
 
     let mut left_lines: Vec<Line> = Vec::new();
@@ -379,7 +379,7 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, area: Rect) {
     let right_bg = if right_selected {
         Color::Rgb(40, 10, 50)
     } else {
-        Color::Reset
+        Color::Rgb(20, 5, 25)
     };
 
     let mut right_lines: Vec<Line> = Vec::new();

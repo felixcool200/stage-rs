@@ -32,22 +32,30 @@ pub struct Hunk {
     pub header: String,     // e.g. "@@ -10,5 +12,7 @@"
 }
 
-/// Get the index (staged) content and working tree content for a file.
-pub fn get_diff_content(repo: &Repository, path: &str) -> Result<(String, String)> {
-    let workdir = repo.workdir().ok_or_else(|| eyre!("bare repo"))?;
-    let full_path = workdir.join(path);
-
-    let workdir_content = if full_path.exists() {
-        std::fs::read_to_string(&full_path)?
+/// Get diff content for a file.
+/// For unstaged/untracked files: index (or HEAD) vs working tree.
+/// For staged files: HEAD vs index.
+pub fn get_diff_content(repo: &Repository, path: &str, staged: bool) -> Result<(String, String)> {
+    if staged {
+        let head_content = get_head_content(repo, path).unwrap_or_default();
+        let index_content = get_index_content(repo, path).unwrap_or_default();
+        Ok((head_content, index_content))
     } else {
-        String::new()
-    };
+        let workdir = repo.workdir().ok_or_else(|| eyre!("bare repo"))?;
+        let full_path = workdir.join(path);
 
-    let index_content = get_index_content(repo, path)
-        .or_else(|_| get_head_content(repo, path))
-        .unwrap_or_default();
+        let workdir_content = if full_path.exists() {
+            std::fs::read_to_string(&full_path)?
+        } else {
+            String::new()
+        };
 
-    Ok((index_content, workdir_content))
+        let index_content = get_index_content(repo, path)
+            .or_else(|_| get_head_content(repo, path))
+            .unwrap_or_default();
+
+        Ok((index_content, workdir_content))
+    }
 }
 
 fn get_index_content(repo: &Repository, path: &str) -> Result<String> {

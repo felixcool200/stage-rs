@@ -1470,7 +1470,8 @@ impl App {
     fn load_selected_diff(&mut self) -> Result<()> {
         if let Some(entry) = self.file_entries.get(self.selected_index) {
             let path = entry.path.clone();
-            match self.repo.get_diff_content(&path) {
+            let staged = matches!(entry.status, FileStatus::Staged(_));
+            match self.repo.get_diff_content(&path, staged) {
                 Ok((old, new)) => {
                     let (left_lines, right_lines, line_mapping, hunks) =
                         git::compute_diff(&old, &new);

@@ -34,8 +34,8 @@ impl GitRepo {
         status::get_file_statuses(&self.repo)
     }
 
-    pub fn get_diff_content(&self, path: &str) -> Result<(String, String)> {
-        diff::get_diff_content(&self.repo, path)
+    pub fn get_diff_content(&self, path: &str, staged: bool) -> Result<(String, String)> {
+        diff::get_diff_content(&self.repo, path, staged)
     }
 
     pub fn stage_file(&self, path: &str) -> Result<()> {

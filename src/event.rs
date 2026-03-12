@@ -74,8 +74,8 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
 fn handle_commit_input(modifiers: KeyModifiers, code: KeyCode) -> Option<Message> {
     match (modifiers, code) {
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Message::CloseOverlay),
-        // Ctrl+Enter or Ctrl+D to confirm
-        (KeyModifiers::CONTROL, KeyCode::Enter) | (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+        // Ctrl+S or Ctrl+D to confirm
+        (KeyModifiers::CONTROL, KeyCode::Char('s')) | (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
             Some(Message::ConfirmCommit)
         }
         (_, KeyCode::Esc) => Some(Message::CloseOverlay),

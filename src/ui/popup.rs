@@ -135,9 +135,9 @@ fn render_commit_input(
     frame.render_widget(Clear, area);
 
     let title = if amend {
-        " Amend Commit (Ctrl+Enter to confirm, Esc to cancel) "
+        " Amend Commit (Ctrl+S to confirm, Esc to cancel) "
     } else {
-        " Commit (Ctrl+Enter to confirm, Esc to cancel) "
+        " Commit (Ctrl+S to confirm, Esc to cancel) "
     };
 
     let block = Block::default()
@@ -148,57 +148,47 @@ fn render_commit_input(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Build styled lines with cursor
+    // Split inner area: text input on top, fixed hint at bottom
+    let chunks = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(2),
+    ]).split(inner);
+    let text_area = chunks[0];
+    let hint_area = chunks[1];
+
+    // Build styled lines for text input
     let mut lines: Vec<Line> = Vec::new();
-    for (row, line_text) in input.lines.iter().enumerate() {
-        if row == input.cursor_row {
-            // Insert a cursor indicator
-            let col = input.cursor_col;
-            let before: String = line_text.chars().take(col).collect();
-            let cursor_char: String = line_text.chars().skip(col).take(1).collect();
-            let after: String = line_text.chars().skip(col + 1).collect();
-
-            let cursor_display = if cursor_char.is_empty() {
-                " ".to_string()
-            } else {
-                cursor_char
-            };
-
-            lines.push(Line::from(vec![
-                Span::styled(before, Style::default().fg(Color::White)),
-                Span::styled(
-                    cursor_display,
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::White),
-                ),
-                Span::styled(after, Style::default().fg(Color::White)),
-            ]));
-        } else {
-            lines.push(Line::from(Span::styled(
-                line_text.as_str(),
-                Style::default().fg(Color::White),
-            )));
-        }
+    for (_row, line_text) in input.lines.iter().enumerate() {
+        let display = if line_text.is_empty() { " " } else { line_text.as_str() };
+        lines.push(Line::from(Span::styled(
+            display,
+            Style::default().fg(Color::White),
+        )));
     }
 
-    // Show hint below the input
-    let input_height = inner.height.saturating_sub(2) as usize;
-    while lines.len() < input_height {
+    // Fill remaining with ~ indicators
+    let text_height = text_area.height as usize;
+    while lines.len() < text_height {
         lines.push(Line::from(Span::styled("~", Style::default().fg(Color::DarkGray))));
     }
 
-    // Add hint at the bottom
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled(
-            " Ctrl+Enter: commit  Esc: cancel  Enter: new line ",
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]));
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, text_area);
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, inner);
+    // Place real terminal cursor
+    let cursor_x = text_area.x + input.cursor_col as u16;
+    let cursor_y = text_area.y + input.cursor_row as u16;
+    frame.set_cursor_position(ratatui::layout::Position { x: cursor_x, y: cursor_y });
+
+    // Fixed hint at bottom
+    let hint_lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            " Ctrl+S: commit  Esc: cancel  Enter: new line ",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    frame.render_widget(Paragraph::new(hint_lines), hint_area);
 }
 
 fn render_git_log(

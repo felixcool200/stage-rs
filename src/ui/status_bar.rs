@@ -34,9 +34,23 @@ pub fn render_header(app: &App, frame: &mut Frame, area: Rect) {
         }
     };
 
+    let (ahead, behind) = app.ahead_behind;
+    let mut ab_parts = Vec::new();
+    if ahead > 0 {
+        ab_parts.push(format!("↑{ahead}"));
+    }
+    if behind > 0 {
+        ab_parts.push(format!("↓{behind}"));
+    }
+    let ab_str = if ab_parts.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", ab_parts.join(" "))
+    };
+
     let line = Line::from(vec![
         Span::styled(
-            format!("  {branch} "),
+            format!("  {branch}{ab_str} "),
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)

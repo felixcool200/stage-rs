@@ -80,4 +80,34 @@ impl GitRepo {
     pub fn workdir(&self) -> &Path {
         self.repo.workdir().expect("bare repositories not supported")
     }
+
+    /// Returns (ahead, behind) relative to the upstream tracking branch.
+    /// Returns (0, 0) if no upstream is configured.
+    pub fn ahead_behind(&self) -> (usize, usize) {
+        let head = match self.repo.head() {
+            Ok(h) => h,
+            Err(_) => return (0, 0),
+        };
+        let local_oid = match head.target() {
+            Some(oid) => oid,
+            None => return (0, 0),
+        };
+        let branch_name = match head.shorthand() {
+            Some(n) => n.to_string(),
+            None => return (0, 0),
+        };
+        let branch = match self.repo.find_branch(&branch_name, git2::BranchType::Local) {
+            Ok(b) => b,
+            Err(_) => return (0, 0),
+        };
+        let upstream = match branch.upstream() {
+            Ok(u) => u,
+            Err(_) => return (0, 0),
+        };
+        let upstream_oid = match upstream.get().target() {
+            Some(oid) => oid,
+            None => return (0, 0),
+        };
+        self.repo.graph_ahead_behind(local_oid, upstream_oid).unwrap_or((0, 0))
+    }
 }

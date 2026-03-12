@@ -11,6 +11,7 @@ pub struct App {
     pub active_panel: Panel,
     pub diff_state: Option<DiffState>,
     pub branch_name: String,
+    pub ahead_behind: (usize, usize),
     pub should_quit: bool,
     pub status_message: Option<String>,
     pub last_refresh: Instant,
@@ -228,6 +229,7 @@ impl App {
     pub fn new(path: &str, keymap: KeymapName) -> Result<Self> {
         let repo = GitRepo::open(path)?;
         let branch_name = repo.branch_name();
+        let ahead_behind = repo.ahead_behind();
         let file_entries = repo.get_file_statuses()?;
 
         Ok(Self {
@@ -237,6 +239,7 @@ impl App {
             active_panel: Panel::FileList,
             diff_state: None,
             branch_name,
+            ahead_behind,
             should_quit: false,
             status_message: None,
             last_refresh: Instant::now(),
@@ -683,6 +686,7 @@ impl App {
     fn refresh(&mut self) -> Result<()> {
         self.file_entries = self.repo.get_file_statuses()?;
         self.branch_name = self.repo.branch_name();
+        self.ahead_behind = self.repo.ahead_behind();
         if self.selected_index >= self.file_entries.len() {
             self.selected_index = self.file_entries.len().saturating_sub(1);
         }

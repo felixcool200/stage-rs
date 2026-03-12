@@ -328,7 +328,6 @@ pub enum Message {
     ToggleBlame,
     EnterEditMode,
     // Merge conflict resolution
-    OpenConflictResolver,
     ConflictPickOurs,
     ConflictPickTheirs,
     ConflictPickBoth,
@@ -365,6 +364,8 @@ pub enum Message {
     RebaseMoveUp,
     RebaseMoveDown,
     RebaseExecute,
+    RebaseContinue,
+    RebaseAbort,
     // Which-key
     OpenWhichKey,
     // Conflict resolver
@@ -440,10 +441,13 @@ impl App {
                 entries.push(WhichKeyEntry { key: 'b', label: "branches", message: OpenBranchList });
                 entries.push(WhichKeyEntry { key: 'B', label: "blame", message: ToggleBlame });
                 entries.push(WhichKeyEntry { key: 'S', label: "stash", message: StashSave });
-                entries.push(WhichKeyEntry { key: 'W', label: "stash list", message: OpenStashList });
+                entries.push(WhichKeyEntry { key: 'w', label: "stash list", message: OpenStashList });
                 entries.push(WhichKeyEntry { key: 'y', label: "yank", message: YankToClipboard });
                 entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
-                entries.push(WhichKeyEntry { key: 'R', label: "resolve", message: OpenConflictResolver });
+                if self.repo.is_rebasing() {
+                    entries.push(WhichKeyEntry { key: 'R', label: "rebase continue", message: RebaseContinue });
+                    entries.push(WhichKeyEntry { key: 'A', label: "rebase abort", message: RebaseAbort });
+                }
             }
             (Panel::DiffView, _) if in_conflict => {
                 entries.push(WhichKeyEntry { key: 'o', label: "pick ours", message: ConflictPickOurs });
@@ -451,6 +455,10 @@ impl App {
                 entries.push(WhichKeyEntry { key: 'b', label: "pick both", message: ConflictPickBoth });
                 entries.push(WhichKeyEntry { key: 's', label: "save & stage", message: ConflictSave });
                 entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
+                if self.repo.is_rebasing() {
+                    entries.push(WhichKeyEntry { key: 'R', label: "rebase continue", message: RebaseContinue });
+                    entries.push(WhichKeyEntry { key: 'A', label: "rebase abort", message: RebaseAbort });
+                }
             }
             (Panel::DiffView, false) => {
                 entries.push(WhichKeyEntry { key: 's', label: "stage hunk", message: StageHunk });
@@ -646,42 +654,6 @@ impl App {
                     });
                 } else {
                     self.status_message = Some("Select a file first (Enter on file list)".into());
-                }
-            }
-            Message::OpenConflictResolver => {
-                if let Some(entry) = self.file_entries.get(self.selected_index) {
-                    if entry.status != FileStatus::Conflict {
-                        self.status_message = Some("Not a conflict file".into());
-                    } else {
-                        let path = entry.path.clone();
-                        let workdir = self.repo.workdir().to_path_buf();
-                        let full_path = workdir.join(&path);
-                        match std::fs::read_to_string(&full_path) {
-                            Ok(content) => {
-                                match parse_conflicts(&content) {
-                                    Some(parsed) => {
-                                        self.conflict_state = Some(ConflictState {
-                                            file_path: path,
-                                            sections: parsed.sections,
-                                            current_section: 0,
-                                            prefix: parsed.prefix,
-                                            left_name: parsed.left_name,
-                                            right_name: parsed.right_name,
-                                        });
-                                        self.status_message = Some(format!(
-                                            "Conflict: Space=actions  ↑/↓=navigate  ←/Esc=back"
-                                        ));
-                                    }
-                                    None => {
-                                        self.status_message = Some("No conflict markers found".into());
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                self.status_message = Some(format!("Cannot read: {e}"));
-                            }
-                        }
-                    }
                 }
             }
             Message::ConflictPickOurs => {
@@ -1048,7 +1020,12 @@ impl App {
                                 }
                             }
                             Err(e) => {
-                                self.status_message = Some(format!("Undo failed: {e}"));
+                                let msg = format!("{e}");
+                                if msg.contains("Unmerged") || msg.contains("merge") {
+                                    self.status_message = Some("Cannot undo commit during a merge — resolve or abort the merge first".into());
+                                } else {
+                                    self.status_message = Some(format!("Undo failed: {e}"));
+                                }
                             }
                         }
                     }
@@ -1208,12 +1185,57 @@ impl App {
                         }
                         Ok(o) => {
                             let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
-                            self.status_message = Some(format!("Rebase failed: {err}"));
+                            if self.repo.is_rebasing() {
+                                self.status_message = Some("Rebase paused — resolve conflicts, then Space → R:continue / A:abort".into());
+                                self.refresh()?;
+                            } else {
+                                self.status_message = Some(format!("Rebase failed: {err}"));
+                            }
                         }
                         Err(e) => {
                             self.status_message = Some(format!("Rebase error: {e}"));
                         }
                     }
+                }
+            }
+            Message::RebaseContinue => {
+                if self.repo.is_rebasing() {
+                    match self.repo.rebase_continue() {
+                        Ok(msg) => {
+                            if self.repo.is_rebasing() {
+                                self.status_message = Some("Rebase paused — resolve next conflict, then continue".into());
+                            } else {
+                                self.status_message = Some(msg);
+                            }
+                            self.refresh()?;
+                            if self.diff_state.is_some() {
+                                self.load_selected_diff()?;
+                            }
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Rebase continue failed: {e}"));
+                        }
+                    }
+                } else {
+                    self.status_message = Some("No rebase in progress".into());
+                }
+            }
+            Message::RebaseAbort => {
+                if self.repo.is_rebasing() {
+                    match self.repo.rebase_abort() {
+                        Ok(msg) => {
+                            self.status_message = Some(msg);
+                            self.refresh()?;
+                            if self.diff_state.is_some() {
+                                self.load_selected_diff()?;
+                            }
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Rebase abort failed: {e}"));
+                        }
+                    }
+                } else {
+                    self.status_message = Some("No rebase in progress".into());
                 }
             }
             Message::ViewCommitDetail => {
@@ -1513,6 +1535,13 @@ impl App {
         self.repo.stage_content(&path, &patched)?;
         let verb = if is_staged { "Unstaged" } else { "Staged" };
         self.status_message = Some(format!("{verb} {display_count} line(s) of {path}"));
+        // Reset to hunk nav before reloading so stale line indices aren't preserved
+        if let Some(ds) = &mut self.diff_state {
+            ds.view_mode = DiffViewMode::HunkNav;
+            ds.selected_lines.clear();
+            ds.hunk_changed_rows.clear();
+            ds.saved_line_selection = None;
+        }
         self.refresh()?;
         self.load_selected_diff()?;
         Ok(())

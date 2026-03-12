@@ -42,14 +42,10 @@ pub fn get_log(repo: &Repository, max_count: usize) -> Result<Vec<LogEntry>> {
 
 /// Get the diff for a specific commit as a string.
 pub fn get_commit_diff(repo: &Repository, hash: &str) -> Result<String> {
-    let oid = git2::Oid::from_str(hash)
-        .or_else(|_| {
-            // Try partial match
-            let obj = repo.revparse_single(hash)?;
-            Ok(obj.id())
-        })
-        .map_err(|e: git2::Error| color_eyre::eyre::eyre!("Cannot find commit: {e}"))?;
-    let commit = repo.find_commit(oid)?;
+    let obj = repo.revparse_single(hash)
+        .map_err(|e| color_eyre::eyre::eyre!("Cannot find commit: {e}"))?;
+    let commit = obj.peel_to_commit()
+        .map_err(|e| color_eyre::eyre::eyre!("Not a commit: {e}"))?;
     let tree = commit.tree()?;
     let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
     let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;

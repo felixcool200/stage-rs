@@ -171,6 +171,7 @@ pub enum PendingAction {
     CommitAmend,
     UndoLastCommit,
     DiscardChanges { path: String },
+    StageEntireFile { path: String },
 }
 
 impl Overlay {
@@ -443,10 +444,20 @@ impl App {
             Message::StageFile => {
                 if let Some(entry) = self.file_entries.get(self.selected_index) {
                     let path = entry.path.clone();
-                    self.repo.stage_file(&path)?;
-                    self.status_message = Some(format!("Staged: {path}"));
-                    self.refresh()?;
-                    self.load_selected_diff()?;
+                    // In diff view with hunks available, confirm before staging entire file
+                    let in_diff_partial = self.active_panel == Panel::DiffView
+                        && self.diff_state.as_ref().map_or(false, |ds| !ds.hunks.is_empty());
+                    if in_diff_partial {
+                        self.overlay = Overlay::Confirm {
+                            message: format!("Stage entire file '{path}'? (Use 's' to stage current hunk)"),
+                            action: PendingAction::StageEntireFile { path },
+                        };
+                    } else {
+                        self.repo.stage_file(&path)?;
+                        self.status_message = Some(format!("Staged: {path}"));
+                        self.refresh()?;
+                        self.load_selected_diff()?;
+                    }
                 }
             }
             Message::StageHunk => {
@@ -1060,6 +1071,12 @@ impl App {
                                 self.status_message = Some(format!("Discard failed: {e}"));
                             }
                         }
+                    }
+                    PendingAction::StageEntireFile { path } => {
+                        self.repo.stage_file(&path)?;
+                        self.status_message = Some(format!("Staged: {path}"));
+                        self.refresh()?;
+                        self.load_selected_diff()?;
                     }
                 }
             }

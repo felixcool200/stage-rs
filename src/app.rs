@@ -1,6 +1,6 @@
 use crate::git::{self, BlameLine, BranchEntry, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LogEntry, StashEntry};
 use crate::syntax::Highlighter;
-use color_eyre::Result;
+use color_eyre::{eyre::eyre, Result};
 use std::collections::BTreeSet;
 use std::time::Instant;
 
@@ -292,6 +292,32 @@ impl TextInput {
     }
 }
 
+fn copy_to_clipboard(text: &str) -> Result<()> {
+    use std::io::Write;
+    // Try wl-copy (Wayland), then xclip, then xsel
+    let candidates = [
+        ("wl-copy", vec![]),
+        ("xclip", vec!["-selection", "clipboard"]),
+        ("xsel", vec!["--clipboard", "--input"]),
+    ];
+    for (cmd, args) in &candidates {
+        if let Ok(mut child) = std::process::Command::new(cmd)
+            .args(args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+            return Ok(());
+        }
+    }
+    Err(eyre!("No clipboard tool found (install xclip, xsel, or wl-copy)"))
+}
+
 fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
     s.char_indices()
         .nth(char_idx)
@@ -442,7 +468,7 @@ impl App {
                 entries.push(WhichKeyEntry { key: 'B', label: "blame", message: ToggleBlame });
                 entries.push(WhichKeyEntry { key: 'S', label: "stash", message: StashSave });
                 entries.push(WhichKeyEntry { key: 'w', label: "stash list", message: OpenStashList });
-                entries.push(WhichKeyEntry { key: 'y', label: "yank", message: YankToClipboard });
+                entries.push(WhichKeyEntry { key: 'y', label: "yank name", message: YankToClipboard });
                 entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
                 if self.repo.is_rebasing() {
                     entries.push(WhichKeyEntry { key: 'R', label: "rebase continue", message: RebaseContinue });
@@ -462,17 +488,9 @@ impl App {
             }
             (Panel::DiffView, false) => {
                 entries.push(WhichKeyEntry { key: 's', label: "stage hunk", message: StageHunk });
-                entries.push(WhichKeyEntry { key: 'S', label: "stage file", message: StageFile });
-                entries.push(WhichKeyEntry { key: 'u', label: "unstage", message: UnstageFile });
                 entries.push(WhichKeyEntry { key: 'i', label: "edit", message: EnterEditMode });
-                entries.push(WhichKeyEntry { key: 'c', label: "commit", message: OpenCommit });
-                entries.push(WhichKeyEntry { key: 'C', label: "amend", message: OpenCommitAmend });
-                entries.push(WhichKeyEntry { key: 'z', label: "undo commit", message: UndoLastCommit });
-                entries.push(WhichKeyEntry { key: 'l', label: "log", message: OpenGitLog });
-                entries.push(WhichKeyEntry { key: 'f', label: "fetch", message: GitFetch });
-                entries.push(WhichKeyEntry { key: 'b', label: "branches", message: OpenBranchList });
                 entries.push(WhichKeyEntry { key: 'B', label: "blame", message: ToggleBlame });
-                entries.push(WhichKeyEntry { key: 'y', label: "yank", message: YankToClipboard });
+                entries.push(WhichKeyEntry { key: 'y', label: "yank hunk", message: YankToClipboard });
                 entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
             }
             (Panel::DiffView, true) => {
@@ -484,7 +502,7 @@ impl App {
                     message: StageLines,
                 });
                 entries.push(WhichKeyEntry { key: 'i', label: "edit", message: EnterEditMode });
-                entries.push(WhichKeyEntry { key: 'y', label: "yank", message: YankToClipboard });
+                entries.push(WhichKeyEntry { key: 'y', label: "yank lines", message: YankToClipboard });
                 entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
             }
         }
@@ -542,6 +560,10 @@ impl App {
             }
             Message::StageFile => {
                 if let Some(entry) = self.file_entries.get(self.selected_index) {
+                    if entry.status == FileStatus::Conflict {
+                        self.status_message = Some("Cannot stage conflict file — resolve conflicts first".into());
+                        return Ok(());
+                    }
                     let path = entry.path.clone();
                     // In diff view with hunks available, confirm before staging entire file
                     let in_diff_partial = self.active_panel == Panel::DiffView
@@ -786,7 +808,7 @@ impl App {
             Message::YankToClipboard => {
                 let text = self.get_yank_text();
                 if let Some(text) = text {
-                    match cli_clipboard::set_contents(text.clone()) {
+                    match copy_to_clipboard(&text) {
                         Ok(()) => {
                             let preview: String = text.chars().take(40).collect();
                             self.status_message = Some(format!("Yanked: {preview}"));
@@ -1500,13 +1522,11 @@ impl App {
             if ds.view_mode != DiffViewMode::LineNav {
                 return Ok(());
             }
-            let user_selected = if ds.selected_lines.is_empty() {
-                let mut s = BTreeSet::new();
-                s.insert(ds.cursor_line);
-                s
-            } else {
-                ds.selected_lines.clone()
-            };
+            if ds.selected_lines.is_empty() {
+                self.status_message = Some("No lines selected — use Enter/→ to select lines first".into());
+                return Ok(());
+            }
+            let user_selected = ds.selected_lines.clone();
             let count = user_selected.len();
 
             // For staged files, the user selects lines to *unstage*.
@@ -1575,14 +1595,32 @@ impl App {
         if let Overlay::GitLog { entries, selected, .. } = &self.overlay {
             return entries.get(*selected).map(|e| e.hash.clone());
         }
-        // In diff line mode, yank selected lines
         if let Some(ds) = &self.diff_state {
-            if ds.view_mode == DiffViewMode::LineNav && !ds.selected_lines.is_empty() {
-                let lines: Vec<String> = ds.selected_lines.iter()
+            // In line mode, yank selected lines (or current line if none selected)
+            if ds.view_mode == DiffViewMode::LineNav {
+                let rows: Vec<usize> = if ds.selected_lines.is_empty() {
+                    vec![ds.cursor_line]
+                } else {
+                    ds.selected_lines.iter().copied().collect()
+                };
+                let lines: Vec<String> = rows.iter()
                     .filter_map(|&row| ds.right_lines.get(row).map(|l| l.content.clone()))
                     .collect();
                 if !lines.is_empty() {
                     return Some(lines.join("\n"));
+                }
+            }
+            // In hunk mode, yank all changed lines in the current hunk
+            if ds.view_mode == DiffViewMode::HunkNav {
+                if let Some(hunk) = ds.hunks.get(ds.current_hunk) {
+                    let lines: Vec<String> = ds.right_lines[hunk.display_start..hunk.display_end]
+                        .iter()
+                        .filter(|l| l.kind == git::DiffLineKind::Added || l.kind == git::DiffLineKind::Equal)
+                        .map(|l| l.content.clone())
+                        .collect();
+                    if !lines.is_empty() {
+                        return Some(lines.join("\n"));
+                    }
                 }
             }
         }
@@ -1641,7 +1679,7 @@ impl App {
         match self.repo.checkout_branch(name) {
             Ok(()) => {
                 self.status_message = Some(format!("Switched to {name}"));
-                self.refresh()?;
+                self.reset_after_checkout()?;
             }
             Err(e) => {
                 self.status_message = Some(format!("Checkout failed: {e}"));
@@ -1654,12 +1692,22 @@ impl App {
         match self.repo.force_checkout_branch(name) {
             Ok(()) => {
                 self.status_message = Some(format!("Switched to {name} (changes discarded)"));
-                self.refresh()?;
+                self.reset_after_checkout()?;
             }
             Err(e) => {
                 self.status_message = Some(format!("Checkout failed: {e}"));
             }
         }
+        Ok(())
+    }
+
+    fn reset_after_checkout(&mut self) -> Result<()> {
+        self.diff_state = None;
+        self.conflict_state = None;
+        self.blame_data = None;
+        self.selected_index = 0;
+        self.active_panel = Panel::FileList;
+        self.refresh()?;
         Ok(())
     }
 
@@ -1694,6 +1742,12 @@ impl App {
             // Close conflict resolver when navigating away from a conflict file
             if self.conflict_state.is_some() {
                 self.conflict_state = None;
+            }
+
+            // Refresh blame data when file changes
+            let file_changed = self.diff_state.as_ref().map(|ds| ds.file_path != path).unwrap_or(true);
+            if file_changed && self.show_blame {
+                self.blame_data = self.repo.get_blame(&path).ok();
             }
 
             let staged = matches!(entry.status, FileStatus::Staged(_));

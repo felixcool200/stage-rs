@@ -1,5 +1,6 @@
-use crate::git::{self, DiffLine, FileEntry, FileStatus, GitRepo, LinePair};
+use crate::git::{self, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair};
 use color_eyre::Result;
+use std::time::Instant;
 
 pub struct App {
     pub repo: GitRepo,
@@ -8,9 +9,9 @@ pub struct App {
     pub active_panel: Panel,
     pub diff_state: Option<DiffState>,
     pub branch_name: String,
-    pub mode: AppMode,
     pub should_quit: bool,
     pub status_message: Option<String>,
+    pub last_refresh: Instant,
 }
 
 pub struct DiffState {
@@ -18,8 +19,13 @@ pub struct DiffState {
     pub left_lines: Vec<DiffLine>,
     pub right_lines: Vec<DiffLine>,
     pub line_mapping: Vec<LinePair>,
+    pub hunks: Vec<Hunk>,
+    pub current_hunk: usize,
     pub scroll: usize,
     pub max_scroll: usize,
+    // Keep raw content for hunk application
+    pub old_content: String,
+    pub new_content: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,23 +34,18 @@ pub enum Panel {
     DiffView,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppMode {
-    Normal,
-}
-
 #[derive(Debug)]
 pub enum Message {
     MoveUp,
     MoveDown,
     SelectFile,
     SwitchPanel,
-    ScrollUp,
-    ScrollDown,
     StageFile,
+    StageHunk,
     UnstageFile,
     DiscardChanges,
     Refresh,
+    AutoRefresh,
     Quit,
 }
 
@@ -61,9 +62,9 @@ impl App {
             active_panel: Panel::FileList,
             diff_state: None,
             branch_name,
-            mode: AppMode::Normal,
             should_quit: false,
             status_message: None,
+            last_refresh: Instant::now(),
         })
     }
 
@@ -78,7 +79,12 @@ impl App {
                         self.selected_index -= 1;
                     }
                 } else if let Some(ds) = &mut self.diff_state {
-                    ds.scroll = ds.scroll.saturating_sub(1);
+                    if ds.hunks.is_empty() {
+                        ds.scroll = ds.scroll.saturating_sub(1);
+                    } else if ds.current_hunk > 0 {
+                        ds.current_hunk -= 1;
+                        ds.scroll = ds.hunks[ds.current_hunk].display_start;
+                    }
                 }
             }
             Message::MoveDown => {
@@ -89,20 +95,13 @@ impl App {
                         self.selected_index += 1;
                     }
                 } else if let Some(ds) = &mut self.diff_state {
-                    if ds.scroll < ds.max_scroll {
-                        ds.scroll += 1;
-                    }
-                }
-            }
-            Message::ScrollUp => {
-                if let Some(ds) = &mut self.diff_state {
-                    ds.scroll = ds.scroll.saturating_sub(1);
-                }
-            }
-            Message::ScrollDown => {
-                if let Some(ds) = &mut self.diff_state {
-                    if ds.scroll < ds.max_scroll {
-                        ds.scroll += 1;
+                    if ds.hunks.is_empty() {
+                        if ds.scroll < ds.max_scroll {
+                            ds.scroll += 1;
+                        }
+                    } else if ds.current_hunk < ds.hunks.len() - 1 {
+                        ds.current_hunk += 1;
+                        ds.scroll = ds.hunks[ds.current_hunk].display_start;
                     }
                 }
             }
@@ -123,6 +122,9 @@ impl App {
                     self.refresh()?;
                     self.load_selected_diff()?;
                 }
+            }
+            Message::StageHunk => {
+                self.stage_current_hunk()?;
             }
             Message::UnstageFile => {
                 if let Some(entry) = self.file_entries.get(self.selected_index) {
@@ -151,8 +153,48 @@ impl App {
             }
             Message::Refresh => {
                 self.refresh()?;
+                // Also reload current diff if viewing one
+                if self.diff_state.is_some() {
+                    self.load_selected_diff()?;
+                }
+            }
+            Message::AutoRefresh => {
+                self.refresh()?;
+                self.last_refresh = Instant::now();
             }
         }
+        Ok(())
+    }
+
+    fn stage_current_hunk(&mut self) -> Result<()> {
+        let (path, old, new, hunk_idx, hunk_count) = {
+            let Some(ds) = &self.diff_state else {
+                self.status_message = Some("No diff to stage from".into());
+                return Ok(());
+            };
+            if ds.hunks.is_empty() {
+                self.status_message = Some("No hunks to stage".into());
+                return Ok(());
+            }
+            (
+                ds.file_path.clone(),
+                ds.old_content.clone(),
+                ds.new_content.clone(),
+                ds.current_hunk,
+                ds.hunks.len(),
+            )
+        };
+
+        // Apply only this hunk to produce new index content
+        let patched = git::apply_hunk(&old, &new, hunk_idx);
+        self.repo.stage_content(&path, &patched)?;
+        self.status_message = Some(format!(
+            "Staged hunk {}/{} of {path}",
+            hunk_idx + 1,
+            hunk_count
+        ));
+        self.refresh()?;
+        self.load_selected_diff()?;
         Ok(())
     }
 
@@ -170,16 +212,31 @@ impl App {
             let path = entry.path.clone();
             match self.repo.get_diff_content(&path) {
                 Ok((old, new)) => {
-                    let (left_lines, right_lines, line_mapping) =
+                    let (left_lines, right_lines, line_mapping, hunks) =
                         git::compute_diff(&old, &new);
                     let max_scroll = left_lines.len().max(right_lines.len());
+                    // Preserve current hunk if still valid, else reset to 0
+                    let prev_hunk = self
+                        .diff_state
+                        .as_ref()
+                        .filter(|ds| ds.file_path == path)
+                        .map(|ds| ds.current_hunk.min(hunks.len().saturating_sub(1)))
+                        .unwrap_or(0);
+                    let scroll = hunks
+                        .get(prev_hunk)
+                        .map(|h| h.display_start)
+                        .unwrap_or(0);
                     self.diff_state = Some(DiffState {
                         file_path: path,
                         left_lines,
                         right_lines,
                         line_mapping,
-                        scroll: 0,
+                        hunks,
+                        current_hunk: prev_hunk,
+                        scroll,
                         max_scroll,
+                        old_content: old,
+                        new_content: new,
                     });
                 }
                 Err(_) => {

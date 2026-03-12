@@ -74,6 +74,22 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 pub fn render_right(app: &App, frame: &mut Frame, area: Rect) {
+    // If in edit mode, render the textarea instead
+    if let Some(edit) = &app.edit_state {
+        let block = Block::default()
+            .title(format!(" Editing: {} [Ctrl+S save, Esc exit] ", edit.file_path))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        frame.render_widget(&edit.textarea, inner);
+        return;
+    }
+
+    render_right_diff(app, frame, area);
+}
+
+fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
     let is_focused = app.active_panel == Panel::DiffView;
     let border_color = if is_focused {
         Color::Cyan

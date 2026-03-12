@@ -24,6 +24,13 @@ pub struct App {
     /// Blame annotations for the current file (None = blame not loaded)
     pub blame_data: Option<Vec<BlameLine>>,
     pub show_blame: bool,
+    /// Edit mode state
+    pub edit_state: Option<EditState>,
+}
+
+pub struct EditState {
+    pub file_path: String,
+    pub textarea: tui_textarea::TextArea<'static>,
 }
 
 pub struct DiffState {
@@ -229,6 +236,9 @@ pub enum Message {
     ExitLineMode,
     SplitHunk,
     ToggleBlame,
+    EnterEditMode,
+    ExitEditMode,
+    SaveEdit,
     ToggleLine,
     StageLines,
     SelectAllLines,
@@ -291,6 +301,7 @@ impl App {
             file_filter: None,
             blame_data: None,
             show_blame: false,
+            edit_state: None,
         })
     }
 
@@ -426,6 +437,56 @@ impl App {
                             self.status_message = Some("Hunk split".into());
                         } else {
                             self.status_message = Some("Cannot split: no context lines within hunk".into());
+                        }
+                    }
+                }
+            }
+            Message::EnterEditMode => {
+                if let Some(ds) = &self.diff_state {
+                    let path = ds.file_path.clone();
+                    let workdir = self.repo.workdir().to_path_buf();
+                    let full_path = workdir.join(&path);
+                    match std::fs::read_to_string(&full_path) {
+                        Ok(content) => {
+                            let lines: Vec<String> = content.lines().map(String::from).collect();
+                            let mut textarea = tui_textarea::TextArea::new(lines);
+                            textarea.set_line_number_style(
+                                ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
+                            );
+                            textarea.set_cursor_line_style(
+                                ratatui::style::Style::default().bg(ratatui::style::Color::Rgb(40, 40, 60)),
+                            );
+                            self.edit_state = Some(EditState {
+                                file_path: path,
+                                textarea,
+                            });
+                            self.status_message = Some("Edit mode: Ctrl+S save, Esc exit".into());
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Cannot read file: {e}"));
+                        }
+                    }
+                }
+            }
+            Message::ExitEditMode => {
+                self.edit_state = None;
+                self.status_message = Some("Edit mode closed".into());
+            }
+            Message::SaveEdit => {
+                if let Some(edit) = &self.edit_state {
+                    let workdir = self.repo.workdir().to_path_buf();
+                    let full_path = workdir.join(&edit.file_path);
+                    let content = edit.textarea.lines().join("\n");
+                    // Add trailing newline if original had one
+                    let content = if content.is_empty() { content } else { content + "\n" };
+                    match std::fs::write(&full_path, &content) {
+                        Ok(()) => {
+                            self.status_message = Some(format!("Saved: {}", edit.file_path));
+                            self.refresh()?;
+                            self.load_selected_diff()?;
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Save failed: {e}"));
                         }
                     }
                 }

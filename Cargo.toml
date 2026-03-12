@@ -10,3 +10,4 @@ git2 = "0.19"
 similar = { version = "2", features = ["text"] }
 color-eyre = "0.6"
 cli-clipboard = "0.4.0"
+tui-textarea = { version = "0.7.0", features = ["crossterm"] }

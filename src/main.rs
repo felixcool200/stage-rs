@@ -63,7 +63,11 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         terminal.draw(|frame| ui::render(app, frame))?;
 
         let branch_creating = matches!(app.overlay, Overlay::BranchList { creating: Some(_), .. });
-        if matches!(app.overlay, Overlay::CommitInput { .. }) {
+        if app.edit_state.is_some() {
+            if let Some(msg) = poll_edit_mode(app)? {
+                app.update(msg)?;
+            }
+        } else if matches!(app.overlay, Overlay::CommitInput { .. }) {
             if let Some(msg) = poll_with_text_input(app)? {
                 app.update(msg)?;
             }
@@ -84,6 +88,38 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn poll_edit_mode(app: &mut App) -> Result<Option<app::Message>> {
+    if !crossterm::event::poll(Duration::from_millis(250))? {
+        return Ok(None);
+    }
+    let event = crossterm::event::read()?;
+
+    if let crossterm::event::Event::Key(key) = &event {
+        if key.kind != crossterm::event::KeyEventKind::Press {
+            return Ok(None);
+        }
+        use crossterm::event::{KeyCode, KeyModifiers};
+        match (key.modifiers, key.code) {
+            (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
+                return Ok(Some(app::Message::SaveEdit));
+            }
+            (_, KeyCode::Esc) => {
+                return Ok(Some(app::Message::ExitEditMode));
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+                return Ok(Some(app::Message::Quit));
+            }
+            _ => {}
+        }
+    }
+
+    // Forward event to textarea
+    if let Some(edit) = &mut app.edit_state {
+        edit.textarea.input(event);
+    }
+    Ok(None)
 }
 
 fn poll_branch_create(app: &mut App) -> Result<Option<app::Message>> {

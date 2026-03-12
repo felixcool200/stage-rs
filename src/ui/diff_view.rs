@@ -24,6 +24,23 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
 
     let blame_data = if app.show_blame { app.blame_data.as_deref() } else { None };
 
+    // Build a map from display line index to old-file line index for blame
+    let blame_map: Vec<Option<usize>> = if blame_data.is_some() {
+        let mut file_line = 0usize;
+        ds.left_lines.iter().map(|dl| {
+            match dl.kind {
+                DiffLineKind::Equal | DiffLineKind::Removed => {
+                    let idx = file_line;
+                    file_line += 1;
+                    Some(idx)
+                }
+                _ => None, // Spacer lines have no blame
+            }
+        }).collect()
+    } else {
+        Vec::new()
+    };
+
     let lines: Vec<Line> = ds
         .left_lines
         .iter()
@@ -39,7 +56,9 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
 
             // Show blame annotation if enabled
             if let Some(blame) = blame_data {
-                if let Some(bl) = blame.get(i) {
+                let blame_line = blame_map.get(i).copied().flatten()
+                    .and_then(|fi| blame.get(fi));
+                if let Some(bl) = blame_line {
                     let annotation = format!("{} {:>8} ", bl.hash, truncate_str(&bl.author, 8));
                     spans.push(Span::styled(annotation, Style::default().fg(Color::DarkGray)));
                 } else {

@@ -8,6 +8,8 @@ pub struct App {
     pub repo: GitRepo,
     pub file_entries: Vec<FileEntry>,
     pub selected_index: usize,
+    /// Whether the "Repository" header is selected (above all files)
+    pub header_selected: bool,
     pub active_panel: Panel,
     pub diff_state: Option<DiffState>,
     pub branch_name: String,
@@ -418,6 +420,7 @@ impl App {
             repo,
             file_entries,
             selected_index: 0,
+            header_selected: false,
             active_panel: Panel::FileList,
             diff_state: None,
             branch_name,
@@ -442,6 +445,15 @@ impl App {
         Ok(app)
     }
 
+    /// Returns the currently selected file entry, or None if the header is selected.
+    pub fn selected_file_entry(&self) -> Option<&FileEntry> {
+        if self.header_selected {
+            None
+        } else {
+            self.file_entries.get(self.selected_index)
+        }
+    }
+
     pub fn build_which_key_entries(&self) -> Vec<WhichKeyEntry> {
         use Message::*;
         let in_line_mode = self
@@ -455,10 +467,8 @@ impl App {
         let in_conflict = self.conflict_state.is_some();
 
         match (self.active_panel, in_line_mode) {
-            (Panel::FileList, _) => {
-                entries.push(WhichKeyEntry { key: 's', label: "stage", message: StageFile });
-                entries.push(WhichKeyEntry { key: 'u', label: "unstage", message: UnstageFile });
-                entries.push(WhichKeyEntry { key: 'd', label: "discard", message: DiscardChanges });
+            (Panel::FileList, _) if self.header_selected => {
+                // Repository-level commands
                 entries.push(WhichKeyEntry { key: 'c', label: "commit", message: OpenCommit });
                 entries.push(WhichKeyEntry { key: 'C', label: "amend", message: OpenCommitAmend });
                 entries.push(WhichKeyEntry { key: 'z', label: "undo commit", message: UndoLastCommit });
@@ -468,11 +478,29 @@ impl App {
                 entries.push(WhichKeyEntry { key: 'B', label: "blame", message: ToggleBlame });
                 entries.push(WhichKeyEntry { key: 'S', label: "stash", message: StashSave });
                 entries.push(WhichKeyEntry { key: 'w', label: "stash list", message: OpenStashList });
-                entries.push(WhichKeyEntry { key: 'y', label: "yank name", message: YankToClipboard });
                 entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
                 if self.repo.is_rebasing() {
                     entries.push(WhichKeyEntry { key: 'R', label: "rebase continue", message: RebaseContinue });
                     entries.push(WhichKeyEntry { key: 'A', label: "rebase abort", message: RebaseAbort });
+                }
+            }
+            (Panel::FileList, _) => {
+                // Per-file context-sensitive commands
+                if let Some(entry) = self.selected_file_entry() {
+                    match &entry.status {
+                        FileStatus::Staged(_) => {
+                            entries.push(WhichKeyEntry { key: 'u', label: "unstage", message: UnstageFile });
+                        }
+                        FileStatus::Conflict => {
+                            // Conflict files auto-open resolver; no direct actions here
+                        }
+                        _ => {
+                            // Modified, untracked, etc.
+                            entries.push(WhichKeyEntry { key: 's', label: "stage", message: StageFile });
+                            entries.push(WhichKeyEntry { key: 'd', label: "discard", message: DiscardChanges });
+                        }
+                    }
+                    entries.push(WhichKeyEntry { key: 'y', label: "yank name", message: YankToClipboard });
                 }
             }
             (Panel::DiffView, _) if in_conflict => {
@@ -553,13 +581,17 @@ impl App {
                         ds.selected_lines.clear();
                     }
                 }
+                // Don't switch to diff view when header is selected (no diff loaded)
+                if self.header_selected && self.active_panel == Panel::FileList {
+                    return Ok(());
+                }
                 self.active_panel = match self.active_panel {
                     Panel::FileList => Panel::DiffView,
                     Panel::DiffView => Panel::FileList,
                 };
             }
             Message::StageFile => {
-                if let Some(entry) = self.file_entries.get(self.selected_index) {
+                if let Some(entry) = self.selected_file_entry() {
                     if entry.status == FileStatus::Conflict {
                         self.status_message = Some("Cannot stage conflict file — resolve conflicts first".into());
                         return Ok(());
@@ -585,7 +617,7 @@ impl App {
                 self.stage_current_hunk()?;
             }
             Message::UnstageFile => {
-                if let Some(entry) = self.file_entries.get(self.selected_index) {
+                if let Some(entry) = self.selected_file_entry() {
                     let path = entry.path.clone();
                     self.repo.unstage_file(&path)?;
                     self.status_message = Some(format!("Unstaged: {path}"));
@@ -594,7 +626,7 @@ impl App {
                 }
             }
             Message::DiscardChanges => {
-                if let Some(entry) = self.file_entries.get(self.selected_index) {
+                if let Some(entry) = self.selected_file_entry() {
                     let path = entry.path.clone();
                     match entry.status {
                         FileStatus::Unstaged(_) | FileStatus::Conflict => {
@@ -1367,9 +1399,16 @@ impl App {
         }
 
         if self.active_panel == Panel::FileList {
-            if self.selected_index > 0 {
+            if self.header_selected {
+                // Already at top, do nothing
+            } else if self.selected_index > 0 {
                 self.selected_index -= 1;
                 self.load_selected_diff()?;
+            } else {
+                // At index 0, move to header
+                self.header_selected = true;
+                self.diff_state = None;
+                self.conflict_state = None;
             }
             return Ok(());
         }
@@ -1447,7 +1486,13 @@ impl App {
         }
 
         if self.active_panel == Panel::FileList {
-            if !self.file_entries.is_empty()
+            if self.header_selected {
+                if !self.file_entries.is_empty() {
+                    self.header_selected = false;
+                    self.selected_index = 0;
+                    self.load_selected_diff()?;
+                }
+            } else if !self.file_entries.is_empty()
                 && self.selected_index < self.file_entries.len() - 1
             {
                 self.selected_index += 1;
@@ -1571,7 +1616,7 @@ impl App {
         self.file_entries = self.repo.get_file_statuses()?;
         self.branch_name = self.repo.branch_name();
         self.ahead_behind = self.repo.ahead_behind();
-        if self.selected_index >= self.file_entries.len() {
+        if !self.header_selected && self.selected_index >= self.file_entries.len() {
             self.selected_index = self.file_entries.len().saturating_sub(1);
         }
         Ok(())
@@ -1625,7 +1670,7 @@ impl App {
             }
         }
         // In file list, yank the file path
-        if let Some(entry) = self.file_entries.get(self.selected_index) {
+        if let Some(entry) = self.selected_file_entry() {
             return Some(entry.path.clone());
         }
         None
@@ -1706,17 +1751,19 @@ impl App {
         self.conflict_state = None;
         self.blame_data = None;
         self.selected_index = 0;
+        self.header_selected = false;
         self.active_panel = Panel::FileList;
         self.refresh()?;
         Ok(())
     }
 
     fn load_selected_diff(&mut self) -> Result<()> {
-        if let Some(entry) = self.file_entries.get(self.selected_index) {
+        if let Some(entry) = self.selected_file_entry() {
             let path = entry.path.clone();
+            let status = entry.status.clone();
 
             // Auto-open conflict resolver for conflict files
-            if entry.status == FileStatus::Conflict {
+            if status == FileStatus::Conflict {
                 self.diff_state = None;
                 let workdir = self.repo.workdir().to_path_buf();
                 let full_path = workdir.join(&path);
@@ -1750,7 +1797,7 @@ impl App {
                 self.blame_data = self.repo.get_blame(&path).ok();
             }
 
-            let staged = matches!(entry.status, FileStatus::Staged(_));
+            let staged = matches!(status, FileStatus::Staged(_));
             match self.repo.get_diff_content(&path, staged) {
                 Ok((old, new)) => {
                     let (left_lines, right_lines, hunks) =

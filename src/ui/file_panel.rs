@@ -45,8 +45,23 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let filtered_indices: std::collections::HashSet<usize> = filtered.iter().map(|(i, _)| *i).collect();
 
     let mut items: Vec<ListItem> = Vec::new();
+    // None = header or section label (not a file), Some(i) = file entry index
     let mut list_index_to_entry: Vec<Option<usize>> = Vec::new();
     let mut current_section: Option<&str> = None;
+
+    // "Repository" header entry at position 0
+    let header_style = if app.header_selected && is_focused {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    items.push(ListItem::new(Line::from(vec![
+        Span::styled(" ", Style::default()),
+        Span::styled("Repository", header_style),
+    ])));
+    list_index_to_entry.push(None); // header, not a file
 
     for (i, entry) in app.file_entries.iter().enumerate() {
         if filtering && !filtered_indices.contains(&i) {
@@ -131,10 +146,14 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         list_index_to_entry.push(Some(i));
     }
 
-    // Map app.selected_index to the list display index
-    let display_index = list_index_to_entry
-        .iter()
-        .position(|e| *e == Some(app.selected_index));
+    // Map selection to the list display index
+    let display_index = if app.header_selected {
+        Some(0) // Header is always at position 0
+    } else {
+        list_index_to_entry
+            .iter()
+            .position(|e| *e == Some(app.selected_index))
+    };
 
     let list = List::new(items)
         .highlight_style(

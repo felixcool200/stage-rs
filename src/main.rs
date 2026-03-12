@@ -235,6 +235,7 @@ fn poll_with_filter(app: &mut App) -> Result<Option<app::Message>> {
             // Select first matching entry
             if let Some((idx, _)) = app.filtered_entries().first() {
                 app.selected_index = *idx;
+                app.header_selected = false;
             }
             app.file_filter = None;
             return Ok(None);
@@ -257,6 +258,7 @@ fn poll_with_filter(app: &mut App) -> Result<Option<app::Message>> {
     // Update selected index to first matching entry
     if let Some((idx, _)) = app.filtered_entries().first() {
         app.selected_index = *idx;
+        app.header_selected = false;
     }
     Ok(None)
 }

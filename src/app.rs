@@ -121,6 +121,43 @@ pub enum Overlay {
         diff_lines: Vec<String>,
         scroll: usize,
     },
+    Rebase {
+        entries: Vec<RebaseEntry>,
+        selected: usize,
+        base_hash: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct RebaseEntry {
+    pub hash: String,
+    pub message: String,
+    pub action: RebaseAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RebaseAction {
+    Pick,
+    Squash,
+    Drop,
+}
+
+impl RebaseAction {
+    pub fn cycle(self) -> Self {
+        match self {
+            RebaseAction::Pick => RebaseAction::Squash,
+            RebaseAction::Squash => RebaseAction::Drop,
+            RebaseAction::Drop => RebaseAction::Pick,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RebaseAction::Pick => "pick",
+            RebaseAction::Squash => "squash",
+            RebaseAction::Drop => "drop",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -303,6 +340,12 @@ pub enum Message {
     UndoLastCommit,
     OpenGitLog,
     ViewCommitDetail,
+    // Interactive rebase
+    StartRebase,
+    RebaseCycleAction,
+    RebaseMoveUp,
+    RebaseMoveDown,
+    RebaseExecute,
     // Overlay actions (handled by overlay key routing, not keymap)
     CloseOverlay,
     ConfirmCommit,
@@ -993,6 +1036,108 @@ impl App {
                     }
                 }
             }
+            Message::StartRebase => {
+                if let Overlay::GitLog { entries, selected, .. } = &self.overlay {
+                    if *selected == 0 {
+                        self.status_message = Some("Select a base commit (not the first one)".into());
+                    } else {
+                        // Commits from index 0 to selected-1 will be rebased onto selected
+                        let base_hash = entries[*selected].hash.clone();
+                        let rebase_entries: Vec<RebaseEntry> = entries[..*selected]
+                            .iter()
+                            .rev() // oldest first
+                            .map(|e| RebaseEntry {
+                                hash: e.hash.clone(),
+                                message: e.message.clone(),
+                                action: RebaseAction::Pick,
+                            })
+                            .collect();
+                        self.overlay = Overlay::Rebase {
+                            entries: rebase_entries,
+                            selected: 0,
+                            base_hash,
+                        };
+                    }
+                }
+            }
+            Message::RebaseCycleAction => {
+                if let Overlay::Rebase { entries, selected, .. } = &mut self.overlay {
+                    entries[*selected].action = entries[*selected].action.cycle();
+                }
+            }
+            Message::RebaseMoveUp => {
+                if let Overlay::Rebase { entries, selected, .. } = &mut self.overlay {
+                    if *selected > 0 {
+                        entries.swap(*selected, *selected - 1);
+                        *selected -= 1;
+                    }
+                }
+            }
+            Message::RebaseMoveDown => {
+                if let Overlay::Rebase { entries, selected, .. } = &mut self.overlay {
+                    if *selected < entries.len().saturating_sub(1) {
+                        entries.swap(*selected, *selected + 1);
+                        *selected += 1;
+                    }
+                }
+            }
+            Message::RebaseExecute => {
+                if let Overlay::Rebase { entries, base_hash, .. } = &self.overlay {
+                    let workdir = self.repo.workdir().to_path_buf();
+                    // Build the rebase todo
+                    let todo: String = entries
+                        .iter()
+                        .map(|e| format!("{} {} {}", e.action.label(), e.hash, e.message))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    // Write to a temp script that will be used as GIT_SEQUENCE_EDITOR
+                    let todo_path = workdir.join(".git/gitview-rebase-todo");
+                    let _ = std::fs::write(&todo_path, &todo);
+
+                    let script = format!(
+                        "#!/bin/sh\ncp {} \"$1\"",
+                        todo_path.display()
+                    );
+                    let script_path = workdir.join(".git/gitview-rebase-editor.sh");
+                    let _ = std::fs::write(&script_path, &script);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = std::fs::set_permissions(
+                            &script_path,
+                            std::fs::Permissions::from_mode(0o755),
+                        );
+                    }
+
+                    let base = base_hash.clone();
+                    self.overlay = Overlay::None;
+
+                    let output = std::process::Command::new("git")
+                        .args(["rebase", "-i", &base])
+                        .env("GIT_SEQUENCE_EDITOR", script_path.to_str().unwrap_or(""))
+                        .current_dir(&workdir)
+                        .output();
+
+                    // Cleanup
+                    let _ = std::fs::remove_file(&todo_path);
+                    let _ = std::fs::remove_file(&script_path);
+
+                    match output {
+                        Ok(o) if o.status.success() => {
+                            self.status_message = Some("Rebase completed".into());
+                            self.refresh()?;
+                        }
+                        Ok(o) => {
+                            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                            self.status_message = Some(format!("Rebase failed: {err}"));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Rebase error: {e}"));
+                        }
+                    }
+                }
+            }
             Message::ViewCommitDetail => {
                 if let Overlay::GitLog { entries, selected, .. } = &self.overlay {
                     if let Some(entry) = entries.get(*selected) {
@@ -1089,6 +1234,12 @@ impl App {
                 *scroll = scroll.saturating_sub(1);
                 return;
             }
+            Overlay::Rebase { selected, .. } => {
+                if *selected > 0 {
+                    *selected -= 1;
+                }
+                return;
+            }
             Overlay::Confirm { .. } => return,
             Overlay::None => {}
         }
@@ -1157,6 +1308,12 @@ impl App {
             Overlay::CommitDetail { diff_lines, scroll, .. } => {
                 if *scroll < diff_lines.len().saturating_sub(1) {
                     *scroll += 1;
+                }
+                return;
+            }
+            Overlay::Rebase { entries, selected, .. } => {
+                if *selected < entries.len().saturating_sub(1) {
+                    *selected += 1;
                 }
                 return;
             }

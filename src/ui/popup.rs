@@ -30,6 +30,9 @@ pub fn render(app: &App, frame: &mut Frame) {
         Overlay::CommitDetail { hash, message, diff_lines, scroll } => {
             render_commit_detail(frame, hash, message, diff_lines, *scroll);
         }
+        Overlay::Rebase { entries, selected, .. } => {
+            render_rebase(frame, entries, *selected);
+        }
     }
 }
 
@@ -299,6 +302,54 @@ fn render_commit_detail(
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
+}
+
+fn render_rebase(
+    frame: &mut Frame,
+    entries: &[crate::app::RebaseEntry],
+    selected: usize,
+) {
+    let area = centered_rect(75, 60, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Interactive Rebase [Space]cycle [J/K]reorder [Enter]execute [q]cancel ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Magenta));
+
+    let items: Vec<ListItem> = entries
+        .iter()
+        .map(|e| {
+            let action_color = match e.action {
+                crate::app::RebaseAction::Pick => Color::Green,
+                crate::app::RebaseAction::Squash => Color::Yellow,
+                crate::app::RebaseAction::Drop => Color::Red,
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("{:>7} ", e.action.label()),
+                    Style::default().fg(action_color).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{} ", e.hash),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(&e.message, Style::default().fg(Color::White)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 fn render_stash_list(

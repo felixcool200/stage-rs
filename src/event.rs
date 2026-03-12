@@ -39,6 +39,7 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
             Overlay::StashList { .. } => handle_stash_list(key.code),
             Overlay::BranchList { .. } => handle_branch_list(key.code),
             Overlay::CommitDetail { .. } => handle_commit_detail(key.code),
+            Overlay::Rebase { .. } => handle_rebase(key.code, key.modifiers),
             Overlay::None => unreachable!(),
         });
     }
@@ -115,6 +116,20 @@ fn handle_git_log(code: KeyCode) -> Option<Message> {
         KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
         KeyCode::Char('y') => Some(Message::YankToClipboard),
         KeyCode::Enter => Some(Message::ViewCommitDetail),
+        KeyCode::Char('r') => Some(Message::StartRebase),
+        _ => None,
+    }
+}
+
+fn handle_rebase(code: KeyCode, modifiers: KeyModifiers) -> Option<Message> {
+    match (modifiers, code) {
+        (_, KeyCode::Esc) | (_, KeyCode::Char('q')) => Some(Message::CloseOverlay),
+        (_, KeyCode::Char('j')) | (_, KeyCode::Down) => Some(Message::MoveDown),
+        (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(Message::MoveUp),
+        (_, KeyCode::Char(' ') | KeyCode::Char('c')) => Some(Message::RebaseCycleAction),
+        (KeyModifiers::SHIFT, KeyCode::Char('J')) => Some(Message::RebaseMoveDown),
+        (KeyModifiers::SHIFT, KeyCode::Char('K')) => Some(Message::RebaseMoveUp),
+        (_, KeyCode::Enter) => Some(Message::RebaseExecute),
         _ => None,
     }
 }

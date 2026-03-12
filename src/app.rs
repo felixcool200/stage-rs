@@ -77,6 +77,8 @@ pub struct DiffState {
     pub cursor_line: usize,
     pub selected_lines: BTreeSet<usize>,
     pub hunk_changed_rows: Vec<usize>,
+    /// Remembered line selection from the last ExitLineMode (hunk_index, selection, cursor)
+    pub saved_line_selection: Option<(usize, BTreeSet<usize>, usize)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -566,10 +568,22 @@ impl App {
                     if changed.is_empty() {
                         return Ok(());
                     }
-                    ds.cursor_line = changed[0];
+                    // Restore saved selection if re-entering the same hunk
+                    let saved = ds.saved_line_selection.take();
+                    if let Some((saved_hunk, saved_sel, saved_cursor)) = saved {
+                        if saved_hunk == ds.current_hunk {
+                            ds.selected_lines = saved_sel;
+                            ds.cursor_line = saved_cursor;
+                        } else {
+                            ds.selected_lines.clear();
+                            ds.cursor_line = changed[0];
+                        }
+                    } else {
+                        ds.selected_lines.clear();
+                        ds.cursor_line = changed[0];
+                    }
                     ds.scroll = ds.cursor_line.saturating_sub(3);
                     ds.hunk_changed_rows = changed;
-                    ds.selected_lines.clear();
                     ds.view_mode = DiffViewMode::LineNav;
                     self.status_message = None;
                 }
@@ -728,6 +742,14 @@ impl App {
             }
             Message::ExitLineMode => {
                 if let Some(ds) = &mut self.diff_state {
+                    // Save selection so re-entering the same hunk restores it
+                    if !ds.selected_lines.is_empty() {
+                        ds.saved_line_selection = Some((
+                            ds.current_hunk,
+                            ds.selected_lines.clone(),
+                            ds.cursor_line,
+                        ));
+                    }
                     ds.view_mode = DiffViewMode::HunkNav;
                     ds.selected_lines.clear();
                     ds.scroll = ds.hunks.get(ds.current_hunk)
@@ -1491,6 +1513,7 @@ impl App {
                         .get(prev_hunk)
                         .map(|h| h.display_start)
                         .unwrap_or(0);
+                    let prev_saved = prev.and_then(|ds| ds.saved_line_selection.clone());
                     self.diff_state = Some(DiffState {
                         file_path: path,
                         left_lines,
@@ -1505,6 +1528,7 @@ impl App {
                         cursor_line: prev_cursor,
                         selected_lines: prev_selected,
                         hunk_changed_rows: prev_hunk_rows,
+                        saved_line_selection: prev_saved,
                     });
                 }
                 Err(_) => {

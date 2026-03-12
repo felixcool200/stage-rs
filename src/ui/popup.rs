@@ -39,6 +39,9 @@ pub fn render(app: &App, frame: &mut Frame) {
         Overlay::Rebase { entries, selected, .. } => {
             render_rebase(frame, entries, *selected);
         }
+        Overlay::DirtyCheckout { branch, has_conflicts } => {
+            render_dirty_checkout(frame, branch, *has_conflicts);
+        }
     }
 }
 
@@ -68,6 +71,56 @@ fn render_confirm(frame: &mut Frame, message: &str) {
             Span::styled("No", Style::default().fg(Color::DarkGray)),
         ]),
     ];
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, inner);
+}
+
+fn render_dirty_checkout(frame: &mut Frame, branch: &str, has_conflicts: bool) {
+    let area = centered_rect(50, 25, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Uncommitted Changes ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "You have uncommitted changes.".to_string(),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(Span::styled(
+            format!("Switch to {branch}?"),
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+    ];
+
+    if has_conflicts {
+        lines.push(Line::from(Span::styled(
+            " Stash unavailable (unmerged files)",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled(" [s] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled("Stash & switch", Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
+    lines.push(Line::from(vec![
+        Span::styled(" [d] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Span::styled("Discard & switch", Style::default().fg(Color::DarkGray)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled(" [Esc] ", Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)),
+        Span::styled("Cancel", Style::default().fg(Color::DarkGray)),
+    ]));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, inner);

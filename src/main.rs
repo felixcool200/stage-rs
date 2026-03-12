@@ -73,11 +73,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         terminal.draw(|frame| ui::render(app, frame))?;
 
         let branch_creating = matches!(app.overlay, Overlay::BranchList { creating: Some(_), .. });
-        if app.conflict_state.is_some() {
-            if let Some(msg) = poll_conflict_mode(app)? {
-                app.update(msg)?;
-            }
-        } else if app.pending_editor.is_some() {
+        if app.pending_editor.is_some() {
             spawn_editor(terminal, app)?;
         } else if matches!(app.overlay, Overlay::CommitInput { .. }) {
             if let Some(msg) = poll_with_text_input(app)? {
@@ -104,34 +100,6 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn poll_conflict_mode(app: &mut App) -> Result<Option<app::Message>> {
-    if !crossterm::event::poll(Duration::from_millis(250))? {
-        return Ok(None);
-    }
-    let crossterm::event::Event::Key(key) = crossterm::event::read()? else {
-        return Ok(None);
-    };
-    if key.kind != crossterm::event::KeyEventKind::Press {
-        return Ok(None);
-    }
-    use crossterm::event::{KeyCode, KeyModifiers};
-    Ok(match (key.modifiers, key.code) {
-        (_, KeyCode::Esc) => {
-            app.conflict_state = None;
-            app.status_message = Some("Conflict resolver closed".into());
-            None
-        }
-        (_, KeyCode::Left) => Some(app::Message::ConflictPickOurs),
-        (_, KeyCode::Right) => Some(app::Message::ConflictPickTheirs),
-        (_, KeyCode::Char('b')) => Some(app::Message::ConflictPickBoth),
-        (_, KeyCode::Down) => Some(app::Message::ConflictNextSection),
-        (_, KeyCode::Up) => Some(app::Message::ConflictPrevSection),
-        (_, KeyCode::Enter) => Some(app::Message::ConflictSave),
-        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(app::Message::Quit),
-        _ => None,
-    })
 }
 
 fn spawn_editor(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {

@@ -284,7 +284,7 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("  ←:{}  →:{}  b:both  Enter:save  Esc:exit ", cs.left_name, cs.right_name),
+            "  Space:actions  Enter:save  ←/Esc:back ".to_string(),
             Style::default().fg(Color::DarkGray),
         ),
     ]);
@@ -320,22 +320,49 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, area: Rect) {
     let left_inner = left_block.inner(halves[0]);
     frame.render_widget(left_block, halves[0]);
 
+    // Gather context lines: before = previous suffix (or prefix), after = current suffix
+    let context_before: &[String] = if cs.current_section == 0 {
+        &cs.prefix
+    } else {
+        &cs.sections[cs.current_section - 1].suffix
+    };
+    let context_after: &[String] = &section.suffix;
+
+    let context_style = Style::default().fg(Color::DarkGray);
+
     let left_bg = if left_selected {
         Color::Rgb(10, 40, 50)
     } else {
         Color::Reset
     };
-    let left_lines: Vec<Line> = section
-        .ours
-        .iter()
-        .map(|l| {
-            Line::from(Span::styled(
-                format!(" {l}"),
-                Style::default().fg(Color::Cyan).bg(left_bg),
-            ))
-        })
-        .collect();
-    frame.render_widget(Paragraph::new(left_lines), left_inner);
+
+    let mut left_lines: Vec<Line> = Vec::new();
+    for l in context_before {
+        left_lines.push(Line::from(Span::styled(format!(" {l}"), context_style)));
+    }
+    for l in &section.ours {
+        left_lines.push(Line::from(Span::styled(
+            format!(" {l}"),
+            Style::default().fg(Color::Cyan).bg(left_bg),
+        )));
+    }
+    for l in context_after {
+        left_lines.push(Line::from(Span::styled(format!(" {l}"), context_style)));
+    }
+
+    // Scroll so the conflict lines are visible (skip context_before if it's too long)
+    let panel_height = left_inner.height as usize;
+    let conflict_start = context_before.len();
+    let scroll = if conflict_start > panel_height / 3 {
+        conflict_start.saturating_sub(panel_height / 3)
+    } else {
+        0
+    };
+
+    frame.render_widget(
+        Paragraph::new(left_lines).scroll((scroll as u16, 0)),
+        left_inner,
+    );
 
     // Right panel (theirs / right branch)
     let right_block = Block::default()
@@ -354,17 +381,25 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, area: Rect) {
     } else {
         Color::Reset
     };
-    let right_lines: Vec<Line> = section
-        .theirs
-        .iter()
-        .map(|l| {
-            Line::from(Span::styled(
-                format!(" {l}"),
-                Style::default().fg(Color::Magenta).bg(right_bg),
-            ))
-        })
-        .collect();
-    frame.render_widget(Paragraph::new(right_lines), right_inner);
+
+    let mut right_lines: Vec<Line> = Vec::new();
+    for l in context_before {
+        right_lines.push(Line::from(Span::styled(format!(" {l}"), context_style)));
+    }
+    for l in &section.theirs {
+        right_lines.push(Line::from(Span::styled(
+            format!(" {l}"),
+            Style::default().fg(Color::Magenta).bg(right_bg),
+        )));
+    }
+    for l in context_after {
+        right_lines.push(Line::from(Span::styled(format!(" {l}"), context_style)));
+    }
+
+    frame.render_widget(
+        Paragraph::new(right_lines).scroll((scroll as u16, 0)),
+        right_inner,
+    );
 }
 
 /// Push syntax-highlighted spans for a line's content, falling back to a single styled span.
@@ -427,14 +462,21 @@ fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight) -> (Style, Style)
                 Color::Rgb(40, 10, 10)
             }),
         ),
-        DiffLineKind::Added => (
-            Style::default().fg(Color::DarkGray).bg(bg),
-            Style::default().fg(Color::Green).bg(if change_bg_boost {
-                Color::Rgb(20, 60, 20)
-            } else {
-                Color::Rgb(10, 40, 10)
-            }),
-        ),
+        DiffLineKind::Added => {
+            let is_unstage = *highlight == LineHighlight::SelectedUnstage;
+            (
+                Style::default().fg(Color::DarkGray).bg(bg),
+                Style::default()
+                    .fg(if is_unstage { Color::Red } else { Color::Green })
+                    .bg(if is_unstage {
+                        if change_bg_boost { Color::Rgb(60, 20, 20) } else { Color::Rgb(40, 10, 10) }
+                    } else if change_bg_boost {
+                        Color::Rgb(20, 60, 20)
+                    } else {
+                        Color::Rgb(10, 40, 10)
+                    }),
+            )
+        }
         DiffLineKind::Spacer => (
             Style::default().fg(Color::DarkGray).bg(bg),
             Style::default().fg(Color::DarkGray).bg(bg),

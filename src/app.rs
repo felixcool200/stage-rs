@@ -138,6 +138,10 @@ pub enum Overlay {
         selected: usize,
         base_hash: String,
     },
+    DirtyCheckout {
+        branch: String,
+        has_conflicts: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -328,8 +332,6 @@ pub enum Message {
     ConflictPickOurs,
     ConflictPickTheirs,
     ConflictPickBoth,
-    ConflictNextSection,
-    ConflictPrevSection,
     ConflictSave,
     ToggleLine,
     StageLines,
@@ -365,10 +367,14 @@ pub enum Message {
     RebaseExecute,
     // Which-key
     OpenWhichKey,
+    // Conflict resolver
+    CloseConflict,
     // Overlay actions (handled by overlay key routing, not keymap)
     CloseOverlay,
     ConfirmCommit,
     ConfirmAction,
+    DirtyCheckoutStash,
+    DirtyCheckoutDiscard,
     Quit,
 }
 
@@ -419,6 +425,8 @@ impl App {
 
         let mut entries = Vec::new();
 
+        let in_conflict = self.conflict_state.is_some();
+
         match (self.active_panel, in_line_mode) {
             (Panel::FileList, _) => {
                 entries.push(WhichKeyEntry { key: 's', label: "stage", message: StageFile });
@@ -436,6 +444,13 @@ impl App {
                 entries.push(WhichKeyEntry { key: 'y', label: "yank", message: YankToClipboard });
                 entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
                 entries.push(WhichKeyEntry { key: 'R', label: "resolve", message: OpenConflictResolver });
+            }
+            (Panel::DiffView, _) if in_conflict => {
+                entries.push(WhichKeyEntry { key: 'o', label: "pick ours", message: ConflictPickOurs });
+                entries.push(WhichKeyEntry { key: 't', label: "pick theirs", message: ConflictPickTheirs });
+                entries.push(WhichKeyEntry { key: 'b', label: "pick both", message: ConflictPickBoth });
+                entries.push(WhichKeyEntry { key: 's', label: "save & stage", message: ConflictSave });
+                entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
             }
             (Panel::DiffView, false) => {
                 entries.push(WhichKeyEntry { key: 's', label: "stage hunk", message: StageHunk });
@@ -645,8 +660,6 @@ impl App {
                             Ok(content) => {
                                 match parse_conflicts(&content) {
                                     Some(parsed) => {
-                                        let left = parsed.left_name.clone();
-                                        let right = parsed.right_name.clone();
                                         self.conflict_state = Some(ConflictState {
                                             file_path: path,
                                             sections: parsed.sections,
@@ -656,7 +669,7 @@ impl App {
                                             right_name: parsed.right_name,
                                         });
                                         self.status_message = Some(format!(
-                                            "Conflict: ←={left}  →={right}  b=both  s=save  ↑/↓=navigate  Esc=exit"
+                                            "Conflict: Space=actions  ↑/↓=navigate  ←/Esc=back"
                                         ));
                                     }
                                     None => {
@@ -689,20 +702,6 @@ impl App {
                 if let Some(cs) = &mut self.conflict_state {
                     cs.sections[cs.current_section].resolution = ConflictResolution::Both;
                     self.status_message = Some("Picked: both".into());
-                }
-            }
-            Message::ConflictNextSection => {
-                if let Some(cs) = &mut self.conflict_state {
-                    if cs.current_section < cs.sections.len().saturating_sub(1) {
-                        cs.current_section += 1;
-                    }
-                }
-            }
-            Message::ConflictPrevSection => {
-                if let Some(cs) = &mut self.conflict_state {
-                    if cs.current_section > 0 {
-                        cs.current_section -= 1;
-                    }
                 }
             }
             Message::ConflictSave => {
@@ -744,6 +743,9 @@ impl App {
                         }
                     }
                 }
+            }
+            Message::CloseConflict => {
+                self.active_panel = Panel::FileList;
             }
             Message::ToggleBlame => {
                 if self.show_blame {
@@ -864,20 +866,16 @@ impl App {
                 if let Overlay::BranchList { entries, selected, .. } = &self.overlay {
                     if let Some(entry) = entries.get(*selected) {
                         let name = if entry.is_remote {
-                            // For remote branches like "origin/foo", checkout as local "foo"
                             entry.name.split('/').skip(1).collect::<Vec<_>>().join("/")
                         } else {
                             entry.name.clone()
                         };
-                        self.overlay = Overlay::None;
-                        match self.repo.checkout_branch(&name) {
-                            Ok(()) => {
-                                self.status_message = Some(format!("Switched to {name}"));
-                                self.refresh()?;
-                            }
-                            Err(e) => {
-                                self.status_message = Some(format!("Checkout failed: {e}"));
-                            }
+                        if !self.file_entries.is_empty() {
+                            let has_conflicts = self.file_entries.iter().any(|e| e.status == FileStatus::Conflict);
+                            self.overlay = Overlay::DirtyCheckout { branch: name, has_conflicts };
+                        } else {
+                            self.overlay = Overlay::None;
+                            self.do_checkout(&name)?;
                         }
                     }
                 }
@@ -1072,6 +1070,29 @@ impl App {
                         self.load_selected_diff()?;
                     }
                 }
+            }
+            Message::DirtyCheckoutStash => {
+                let branch = match &self.overlay {
+                    Overlay::DirtyCheckout { branch, .. } => branch.clone(),
+                    _ => return Ok(()),
+                };
+                self.overlay = Overlay::None;
+                match self.repo.stash_save(None) {
+                    Ok(()) => {
+                        self.do_checkout(&branch)?;
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Stash failed: {e}"));
+                    }
+                }
+            }
+            Message::DirtyCheckoutDiscard => {
+                let branch = match &self.overlay {
+                    Overlay::DirtyCheckout { branch, .. } => branch.clone(),
+                    _ => return Ok(()),
+                };
+                self.overlay = Overlay::None;
+                self.do_force_checkout(&branch)?;
             }
             Message::UndoLastCommit => {
                 self.overlay = Overlay::Confirm {
@@ -1297,7 +1318,7 @@ impl App {
                 }
                 return Ok(());
             }
-            Overlay::Confirm { .. } => return Ok(()),
+            Overlay::Confirm { .. } | Overlay::DirtyCheckout { .. } => return Ok(()),
             Overlay::None => {}
         }
 
@@ -1305,6 +1326,12 @@ impl App {
             if self.selected_index > 0 {
                 self.selected_index -= 1;
                 self.load_selected_diff()?;
+            }
+            return Ok(());
+        }
+        if let Some(cs) = &mut self.conflict_state {
+            if cs.current_section > 0 {
+                cs.current_section -= 1;
             }
             return Ok(());
         }
@@ -1371,7 +1398,7 @@ impl App {
                 }
                 return Ok(());
             }
-            Overlay::Confirm { .. } => return Ok(()),
+            Overlay::Confirm { .. } | Overlay::DirtyCheckout { .. } => return Ok(()),
             Overlay::None => {}
         }
 
@@ -1381,6 +1408,12 @@ impl App {
             {
                 self.selected_index += 1;
                 self.load_selected_diff()?;
+            }
+            return Ok(());
+        }
+        if let Some(cs) = &mut self.conflict_state {
+            if cs.current_section < cs.sections.len().saturating_sub(1) {
+                cs.current_section += 1;
             }
             return Ok(());
         }
@@ -1552,9 +1585,16 @@ impl App {
         }
     }
 
-    /// Update current_hunk to the hunk nearest the 1/3 viewport line during scroll.
+    /// Update current_hunk to the hunk nearest the top visible area during scroll.
     fn update_current_hunk_from_scroll(ds: &mut DiffState) {
-        let focus_line = ds.scroll + ds.viewport_height / 3;
+        // Use 1/3 offset only when there's room to scroll up; otherwise use the
+        // actual top of the viewport so early hunks in short files aren't skipped.
+        let offset = ds.viewport_height / 3;
+        let focus_line = if ds.scroll >= offset {
+            ds.scroll + offset
+        } else {
+            ds.scroll
+        };
         // Find the hunk that contains focus_line, or the nearest one after it
         for (i, hunk) in ds.hunks.iter().enumerate() {
             if focus_line < hunk.display_end {
@@ -1566,6 +1606,32 @@ impl App {
         if !ds.hunks.is_empty() {
             ds.current_hunk = ds.hunks.len() - 1;
         }
+    }
+
+    fn do_checkout(&mut self, name: &str) -> Result<()> {
+        match self.repo.checkout_branch(name) {
+            Ok(()) => {
+                self.status_message = Some(format!("Switched to {name}"));
+                self.refresh()?;
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Checkout failed: {e}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn do_force_checkout(&mut self, name: &str) -> Result<()> {
+        match self.repo.force_checkout_branch(name) {
+            Ok(()) => {
+                self.status_message = Some(format!("Switched to {name} (changes discarded)"));
+                self.refresh()?;
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Checkout failed: {e}"));
+            }
+        }
+        Ok(())
     }
 
     fn load_selected_diff(&mut self) -> Result<()> {
@@ -1587,10 +1653,9 @@ impl App {
                             left_name: parsed.left_name.clone(),
                             right_name: parsed.right_name.clone(),
                         });
-                        self.status_message = Some(format!(
-                            "Conflict: ←={}  →={}  b=both  Enter=save  ↑/↓=navigate  Esc=exit",
-                            parsed.left_name, parsed.right_name,
-                        ));
+                        self.status_message = Some(
+                            "Conflict: Space=actions  ↑/↓=navigate  ←/Esc=back".into(),
+                        );
                         return Ok(());
                     }
                 }

@@ -40,6 +40,7 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
             Overlay::BranchList { .. } => handle_branch_list(key.code),
             Overlay::CommitDetail { .. } => handle_commit_detail(key.code),
             Overlay::Rebase { .. } => handle_rebase(key.code, key.modifiers),
+            Overlay::DirtyCheckout { has_conflicts, .. } => handle_dirty_checkout(key.code, *has_conflicts),
             Overlay::None => unreachable!(),
         });
     }
@@ -47,15 +48,19 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
     let ctx = match app.active_panel {
         Panel::FileList => InputContext::FileList,
         Panel::DiffView => {
-            let in_line_mode = app
-                .diff_state
-                .as_ref()
-                .map(|ds| ds.view_mode == DiffViewMode::LineNav)
-                .unwrap_or(false);
-            if in_line_mode {
-                InputContext::DiffLineNav
+            if app.conflict_state.is_some() {
+                InputContext::ConflictNav
             } else {
-                InputContext::DiffHunkNav
+                let in_line_mode = app
+                    .diff_state
+                    .as_ref()
+                    .map(|ds| ds.view_mode == DiffViewMode::LineNav)
+                    .unwrap_or(false);
+                if in_line_mode {
+                    InputContext::DiffLineNav
+                } else {
+                    InputContext::DiffHunkNav
+                }
             }
         }
     };
@@ -130,6 +135,15 @@ fn handle_rebase(code: KeyCode, modifiers: KeyModifiers) -> Option<Message> {
         (_, KeyCode::Up) => Some(Message::MoveUp),
         (_, KeyCode::Char(' ') | KeyCode::Char('c')) => Some(Message::RebaseCycleAction),
         (_, KeyCode::Enter) => Some(Message::RebaseExecute),
+        _ => None,
+    }
+}
+
+fn handle_dirty_checkout(code: KeyCode, has_conflicts: bool) -> Option<Message> {
+    match code {
+        KeyCode::Char('s') if !has_conflicts => Some(Message::DirtyCheckoutStash),
+        KeyCode::Char('d') => Some(Message::DirtyCheckoutDiscard),
+        KeyCode::Esc | KeyCode::Char('c') | KeyCode::Char('q') => Some(Message::CloseOverlay),
         _ => None,
     }
 }

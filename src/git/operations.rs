@@ -227,6 +227,16 @@ pub fn list_branches(repo: &Repository) -> Result<Vec<BranchEntry>> {
 
 pub fn checkout_branch(repo: &Repository, name: &str) -> Result<()> {
     let (obj, reference) = repo.revparse_ext(name)?;
+    repo.checkout_tree(&obj, Some(CheckoutBuilder::new().safe()))?;
+    match reference {
+        Some(r) => repo.set_head(r.name().unwrap_or(&format!("refs/heads/{name}")))?,
+        None => repo.set_head_detached(obj.id())?,
+    }
+    Ok(())
+}
+
+pub fn force_checkout_branch(repo: &Repository, name: &str) -> Result<()> {
+    let (obj, reference) = repo.revparse_ext(name)?;
     repo.checkout_tree(&obj, Some(CheckoutBuilder::new().force()))?;
     match reference {
         Some(r) => repo.set_head(r.name().unwrap_or(&format!("refs/heads/{name}")))?,

@@ -118,6 +118,10 @@ impl GitRepo {
         operations::checkout_branch(&self.repo, name)
     }
 
+    pub fn force_checkout_branch(&self, name: &str) -> Result<()> {
+        operations::force_checkout_branch(&self.repo, name)
+    }
+
     pub fn create_branch(&self, name: &str) -> Result<()> {
         operations::create_branch(&self.repo, name)
     }

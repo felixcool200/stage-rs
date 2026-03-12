@@ -74,6 +74,34 @@ pub fn get_commit_diff(repo: &Repository, hash: &str) -> Result<String> {
     Ok(output)
 }
 
+#[derive(Debug, Clone)]
+pub struct BlameLine {
+    pub hash: String,
+    pub author: String,
+}
+
+pub fn get_blame(repo: &Repository, path: &str) -> Result<Vec<BlameLine>> {
+    let spec = repo.blame_file(std::path::Path::new(path), None)?;
+    let mut lines = Vec::new();
+    for i in 0..spec.len() {
+        let hunk = spec.get_index(i).unwrap();
+        let oid = hunk.final_commit_id();
+        let hash = oid.to_string()[..7].to_string();
+        let author = repo.find_commit(oid)
+            .ok()
+            .and_then(|c| c.author().name().map(String::from))
+            .unwrap_or_default();
+        let count = hunk.lines_in_hunk();
+        for _ in 0..count {
+            lines.push(BlameLine {
+                hash: hash.clone(),
+                author: author.clone(),
+            });
+        }
+    }
+    Ok(lines)
+}
+
 fn format_timestamp(secs: i64) -> String {
     // Simple timestamp formatting without chrono dependency
     // Unix epoch: 1970-01-01

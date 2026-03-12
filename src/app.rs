@@ -1,4 +1,4 @@
-use crate::git::{self, BranchEntry, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair, LogEntry, StashEntry};
+use crate::git::{self, BlameLine, BranchEntry, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair, LogEntry, StashEntry};
 use crate::keymap::KeymapName;
 use color_eyre::Result;
 use std::collections::BTreeSet;
@@ -21,6 +21,9 @@ pub struct App {
     pub saved_commit_msg: Option<String>,
     /// File list filter (None = not filtering)
     pub file_filter: Option<String>,
+    /// Blame annotations for the current file (None = blame not loaded)
+    pub blame_data: Option<Vec<BlameLine>>,
+    pub show_blame: bool,
 }
 
 pub struct DiffState {
@@ -225,6 +228,7 @@ pub enum Message {
     EnterLineMode,
     ExitLineMode,
     SplitHunk,
+    ToggleBlame,
     ToggleLine,
     StageLines,
     SelectAllLines,
@@ -285,6 +289,8 @@ impl App {
             overlay: Overlay::None,
             saved_commit_msg: None,
             file_filter: None,
+            blame_data: None,
+            show_blame: false,
         })
     }
 
@@ -422,6 +428,27 @@ impl App {
                             self.status_message = Some("Cannot split: no context lines within hunk".into());
                         }
                     }
+                }
+            }
+            Message::ToggleBlame => {
+                if self.show_blame {
+                    self.show_blame = false;
+                    self.blame_data = None;
+                    self.status_message = Some("Blame off".into());
+                } else if let Some(ds) = &self.diff_state {
+                    let path = ds.file_path.clone();
+                    match self.repo.get_blame(&path) {
+                        Ok(data) => {
+                            self.blame_data = Some(data);
+                            self.show_blame = true;
+                            self.status_message = Some("Blame on".into());
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Blame failed: {e}"));
+                        }
+                    }
+                } else {
+                    self.status_message = Some("No file selected for blame".into());
                 }
             }
             Message::ExitLineMode => {

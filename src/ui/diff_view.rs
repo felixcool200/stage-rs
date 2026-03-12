@@ -21,6 +21,8 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
     let visible_height = area.height.saturating_sub(2) as usize;
     let is_focused = app.active_panel == Panel::DiffView;
 
+    let blame_data = if app.show_blame { app.blame_data.as_deref() } else { None };
+
     let lines: Vec<Line> = ds
         .left_lines
         .iter()
@@ -33,6 +35,17 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
             let (num_style, text_style) = line_styles(&dl.kind, &highlight);
 
             let mut spans = Vec::new();
+
+            // Show blame annotation if enabled
+            if let Some(blame) = blame_data {
+                if let Some(bl) = blame.get(i) {
+                    let annotation = format!("{} {:>8} ", bl.hash, truncate_str(&bl.author, 8));
+                    spans.push(Span::styled(annotation, Style::default().fg(Color::DarkGray)));
+                } else {
+                    spans.push(Span::styled("                  ", Style::default()));
+                }
+            }
+
             // Show selection indicator in line mode
             if ds.view_mode == DiffViewMode::LineNav && dl.hunk_index.is_some() {
                 let marker = if ds.selected_lines.contains(&i) {
@@ -207,6 +220,14 @@ fn hunk_header_line(ds: &crate::app::DiffState, display_row: usize) -> Line<'sta
         Span::styled(line_num, num_style),
         Span::styled(dl.content.clone(), text_style),
     ])
+}
+
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        format!("{:width$}", s, width = max_len)
+    } else {
+        s[..max_len].to_string()
+    }
 }
 
 fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight) -> (Style, Style) {

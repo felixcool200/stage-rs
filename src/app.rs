@@ -361,7 +361,7 @@ impl App {
         let ahead_behind = repo.ahead_behind();
         let file_entries = repo.get_file_statuses()?;
 
-        Ok(Self {
+        let mut app = Self {
             repo,
             file_entries,
             selected_index: 0,
@@ -380,7 +380,12 @@ impl App {
             pending_editor: None,
             conflict_state: None,
             highlighter: Highlighter::new(),
-        })
+        };
+        // Load diff for the initially selected file
+        if !app.file_entries.is_empty() {
+            let _ = app.load_selected_diff();
+        }
+        Ok(app)
     }
 
     pub fn update(&mut self, msg: Message) -> Result<()> {

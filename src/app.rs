@@ -445,7 +445,9 @@ impl App {
             (Panel::DiffView, true) => {
                 entries.push(WhichKeyEntry { key: 'a', label: "toggle all", message: SelectAllLines });
                 entries.push(WhichKeyEntry { key: 's', label: "stage selected", message: StageLines });
+                entries.push(WhichKeyEntry { key: 'i', label: "edit", message: EnterEditMode });
                 entries.push(WhichKeyEntry { key: 'y', label: "yank", message: YankToClipboard });
+                entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
             }
         }
         entries
@@ -1476,12 +1478,15 @@ impl App {
                     let (left_lines, right_lines, hunks) =
                         git::compute_diff(&old, &new);
                     let max_scroll = left_lines.len().max(right_lines.len());
-                    let prev_hunk = self
-                        .diff_state
-                        .as_ref()
-                        .filter(|ds| ds.file_path == path)
+                    // Preserve state when reloading the same file
+                    let prev = self.diff_state.as_ref().filter(|ds| ds.file_path == path);
+                    let prev_hunk = prev
                         .map(|ds| ds.current_hunk.min(hunks.len().saturating_sub(1)))
                         .unwrap_or(0);
+                    let prev_view_mode = prev.map(|ds| ds.view_mode).unwrap_or(DiffViewMode::HunkNav);
+                    let prev_cursor = prev.map(|ds| ds.cursor_line).unwrap_or(0);
+                    let prev_selected = prev.map(|ds| ds.selected_lines.clone()).unwrap_or_default();
+                    let prev_hunk_rows = prev.map(|ds| ds.hunk_changed_rows.clone()).unwrap_or_default();
                     let scroll = hunks
                         .get(prev_hunk)
                         .map(|h| h.display_start)
@@ -1496,10 +1501,10 @@ impl App {
                         max_scroll,
                         old_content: old,
                         new_content: new,
-                        view_mode: DiffViewMode::HunkNav,
-                        cursor_line: 0,
-                        selected_lines: BTreeSet::new(),
-                        hunk_changed_rows: Vec::new(),
+                        view_mode: prev_view_mode,
+                        cursor_line: prev_cursor,
+                        selected_lines: prev_selected,
+                        hunk_changed_rows: prev_hunk_rows,
                     });
                 }
                 Err(_) => {

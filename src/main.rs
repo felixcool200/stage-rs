@@ -63,7 +63,11 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         terminal.draw(|frame| ui::render(app, frame))?;
 
         let branch_creating = matches!(app.overlay, Overlay::BranchList { creating: Some(_), .. });
-        if app.edit_state.is_some() {
+        if app.conflict_state.is_some() {
+            if let Some(msg) = poll_conflict_mode(app)? {
+                app.update(msg)?;
+            }
+        } else if app.edit_state.is_some() {
             if let Some(msg) = poll_edit_mode(app)? {
                 app.update(msg)?;
             }
@@ -88,6 +92,34 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn poll_conflict_mode(app: &mut App) -> Result<Option<app::Message>> {
+    if !crossterm::event::poll(Duration::from_millis(250))? {
+        return Ok(None);
+    }
+    let crossterm::event::Event::Key(key) = crossterm::event::read()? else {
+        return Ok(None);
+    };
+    if key.kind != crossterm::event::KeyEventKind::Press {
+        return Ok(None);
+    }
+    use crossterm::event::{KeyCode, KeyModifiers};
+    Ok(match (key.modifiers, key.code) {
+        (_, KeyCode::Esc) => {
+            app.conflict_state = None;
+            app.status_message = Some("Conflict resolver closed".into());
+            None
+        }
+        (_, KeyCode::Char('o')) => Some(app::Message::ConflictPickOurs),
+        (_, KeyCode::Char('t')) => Some(app::Message::ConflictPickTheirs),
+        (_, KeyCode::Char('b')) => Some(app::Message::ConflictPickBoth),
+        (_, KeyCode::Char('j') | KeyCode::Down) => Some(app::Message::ConflictNextSection),
+        (_, KeyCode::Char('k') | KeyCode::Up) => Some(app::Message::ConflictPrevSection),
+        (_, KeyCode::Char('s')) => Some(app::Message::ConflictSave),
+        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(app::Message::Quit),
+        _ => None,
+    })
 }
 
 fn poll_edit_mode(app: &mut App) -> Result<Option<app::Message>> {

@@ -1,4 +1,4 @@
-use crate::app::{App, DiffViewMode, Panel};
+use crate::app::{App, ConflictResolution, ConflictState, DiffViewMode, Panel};
 use crate::git::DiffLineKind;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -74,6 +74,12 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 pub fn render_right(app: &App, frame: &mut Frame, area: Rect) {
+    // If in conflict resolver mode
+    if let Some(cs) = &app.conflict_state {
+        render_conflict(frame, cs, area);
+        return;
+    }
+
     // If in edit mode, render the textarea instead
     if let Some(edit) = &app.edit_state {
         let block = Block::default()
@@ -236,6 +242,70 @@ fn hunk_header_line(ds: &crate::app::DiffState, display_row: usize) -> Line<'sta
         Span::styled(line_num, num_style),
         Span::styled(dl.content.clone(), text_style),
     ])
+}
+
+fn render_conflict(frame: &mut Frame, cs: &ConflictState, area: Rect) {
+    let block = Block::default()
+        .title(format!(
+            " Conflict: {} [{}/{}] o=ours t=theirs b=both s=save ",
+            cs.file_path,
+            cs.current_section + 1,
+            cs.sections.len()
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let section = &cs.sections[cs.current_section];
+    let resolution_label = match section.resolution {
+        ConflictResolution::Unresolved => "UNRESOLVED",
+        ConflictResolution::Ours => "OURS",
+        ConflictResolution::Theirs => "THEIRS",
+        ConflictResolution::Both => "BOTH",
+    };
+    let res_color = match section.resolution {
+        ConflictResolution::Unresolved => Color::Red,
+        ConflictResolution::Ours => Color::Cyan,
+        ConflictResolution::Theirs => Color::Magenta,
+        ConflictResolution::Both => Color::Green,
+    };
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!("  Resolution: {resolution_label}"),
+            Style::default().fg(res_color).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  <<<<<<< OURS",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+    ];
+    for l in &section.ours {
+        lines.push(Line::from(Span::styled(
+            format!("  {l}"),
+            Style::default().fg(Color::Cyan),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        "  =======",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(Span::styled(
+        "  >>>>>>> THEIRS",
+        Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+    )));
+    for l in &section.theirs {
+        lines.push(Line::from(Span::styled(
+            format!("  {l}"),
+            Style::default().fg(Color::Magenta),
+        )));
+    }
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, inner);
 }
 
 fn truncate_str(s: &str, max_len: usize) -> String {

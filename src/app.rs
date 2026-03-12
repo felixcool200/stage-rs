@@ -26,6 +26,33 @@ pub struct App {
     pub show_blame: bool,
     /// Edit mode state
     pub edit_state: Option<EditState>,
+    /// Conflict resolver state
+    pub conflict_state: Option<ConflictState>,
+}
+
+pub struct ConflictState {
+    pub file_path: String,
+    pub sections: Vec<ConflictSection>,
+    pub current_section: usize,
+    /// Lines before first conflict
+    pub prefix: Vec<String>,
+}
+
+#[derive(Clone)]
+pub struct ConflictSection {
+    pub ours: Vec<String>,
+    pub theirs: Vec<String>,
+    pub resolution: ConflictResolution,
+    /// Lines between this conflict and the next
+    pub suffix: Vec<String>,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum ConflictResolution {
+    Unresolved,
+    Ours,
+    Theirs,
+    Both,
 }
 
 pub struct EditState {
@@ -239,6 +266,14 @@ pub enum Message {
     EnterEditMode,
     ExitEditMode,
     SaveEdit,
+    // Merge conflict resolution
+    OpenConflictResolver,
+    ConflictPickOurs,
+    ConflictPickTheirs,
+    ConflictPickBoth,
+    ConflictNextSection,
+    ConflictPrevSection,
+    ConflictSave,
     ToggleLine,
     StageLines,
     SelectAllLines,
@@ -302,6 +337,7 @@ impl App {
             blame_data: None,
             show_blame: false,
             edit_state: None,
+            conflict_state: None,
         })
     }
 
@@ -487,6 +523,110 @@ impl App {
                         }
                         Err(e) => {
                             self.status_message = Some(format!("Save failed: {e}"));
+                        }
+                    }
+                }
+            }
+            Message::OpenConflictResolver => {
+                if let Some(entry) = self.file_entries.get(self.selected_index) {
+                    if entry.status != FileStatus::Conflict {
+                        self.status_message = Some("Not a conflict file".into());
+                    } else {
+                        let path = entry.path.clone();
+                        let workdir = self.repo.workdir().to_path_buf();
+                        let full_path = workdir.join(&path);
+                        match std::fs::read_to_string(&full_path) {
+                            Ok(content) => {
+                                match parse_conflicts(&content) {
+                                    Some((prefix, sections)) => {
+                                        self.conflict_state = Some(ConflictState {
+                                            file_path: path,
+                                            sections,
+                                            current_section: 0,
+                                            prefix,
+                                        });
+                                        self.status_message = Some("Conflict resolver: o=ours t=theirs b=both j/k=navigate s=save Esc=exit".into());
+                                    }
+                                    None => {
+                                        self.status_message = Some("No conflict markers found".into());
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Cannot read: {e}"));
+                            }
+                        }
+                    }
+                }
+            }
+            Message::ConflictPickOurs => {
+                if let Some(cs) = &mut self.conflict_state {
+                    cs.sections[cs.current_section].resolution = ConflictResolution::Ours;
+                    self.status_message = Some("Picked: ours".into());
+                }
+            }
+            Message::ConflictPickTheirs => {
+                if let Some(cs) = &mut self.conflict_state {
+                    cs.sections[cs.current_section].resolution = ConflictResolution::Theirs;
+                    self.status_message = Some("Picked: theirs".into());
+                }
+            }
+            Message::ConflictPickBoth => {
+                if let Some(cs) = &mut self.conflict_state {
+                    cs.sections[cs.current_section].resolution = ConflictResolution::Both;
+                    self.status_message = Some("Picked: both".into());
+                }
+            }
+            Message::ConflictNextSection => {
+                if let Some(cs) = &mut self.conflict_state {
+                    if cs.current_section < cs.sections.len().saturating_sub(1) {
+                        cs.current_section += 1;
+                    }
+                }
+            }
+            Message::ConflictPrevSection => {
+                if let Some(cs) = &mut self.conflict_state {
+                    if cs.current_section > 0 {
+                        cs.current_section -= 1;
+                    }
+                }
+            }
+            Message::ConflictSave => {
+                if let Some(cs) = &self.conflict_state {
+                    // Check all resolved
+                    let unresolved = cs.sections.iter().filter(|s| s.resolution == ConflictResolution::Unresolved).count();
+                    if unresolved > 0 {
+                        self.status_message = Some(format!("{unresolved} conflict(s) still unresolved"));
+                    } else {
+                        let mut output = cs.prefix.clone();
+                        for section in &cs.sections {
+                            match section.resolution {
+                                ConflictResolution::Ours => output.extend(section.ours.clone()),
+                                ConflictResolution::Theirs => output.extend(section.theirs.clone()),
+                                ConflictResolution::Both => {
+                                    output.extend(section.ours.clone());
+                                    output.extend(section.theirs.clone());
+                                }
+                                ConflictResolution::Unresolved => {}
+                            }
+                            output.extend(section.suffix.clone());
+                        }
+                        let content = output.join("\n") + "\n";
+                        let path = cs.file_path.clone();
+                        let workdir = self.repo.workdir().to_path_buf();
+                        let full_path = workdir.join(&path);
+                        match std::fs::write(&full_path, &content) {
+                            Ok(()) => {
+                                // Stage the resolved file
+                                let _ = self.repo.stage_file(&path);
+                                self.conflict_state = None;
+                                self.status_message = Some(format!("Resolved and staged: {path}"));
+                                self.refresh()?;
+                                self.load_selected_diff()?;
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Save failed: {e}"));
+                            }
                         }
                     }
                 }
@@ -1210,5 +1350,55 @@ impl App {
             }
         }
         Ok(())
+    }
+}
+
+fn parse_conflicts(content: &str) -> Option<(Vec<String>, Vec<ConflictSection>)> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut sections = Vec::new();
+    let mut prefix = Vec::new();
+    let mut i = 0;
+    let mut in_prefix = true;
+
+    while i < lines.len() {
+        if lines[i].starts_with("<<<<<<<") {
+            in_prefix = false;
+            let mut ours = Vec::new();
+            i += 1;
+            while i < lines.len() && !lines[i].starts_with("=======") {
+                ours.push(lines[i].to_string());
+                i += 1;
+            }
+            i += 1; // skip =======
+            let mut theirs = Vec::new();
+            while i < lines.len() && !lines[i].starts_with(">>>>>>>") {
+                theirs.push(lines[i].to_string());
+                i += 1;
+            }
+            i += 1; // skip >>>>>>>
+            // Collect suffix lines until next conflict or end
+            let mut suffix = Vec::new();
+            while i < lines.len() && !lines[i].starts_with("<<<<<<<") {
+                suffix.push(lines[i].to_string());
+                i += 1;
+            }
+            sections.push(ConflictSection {
+                ours,
+                theirs,
+                resolution: ConflictResolution::Unresolved,
+                suffix,
+            });
+        } else {
+            if in_prefix {
+                prefix.push(lines[i].to_string());
+            }
+            i += 1;
+        }
+    }
+
+    if sections.is_empty() {
+        None
+    } else {
+        Some((prefix, sections))
     }
 }

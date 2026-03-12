@@ -307,10 +307,13 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
     let right_selected = matches!(section.resolution, ConflictResolution::Theirs | ConflictResolution::Both);
 
     // Colors depend on focus: bright when focused, dim when viewing from file list
+    // Selected = full bright color + tinted bg (opaque)
+    // Focused but not selected = faint text, no bg (transparent)
+    // Not focused = gray (dimmed)
     let (left_fg, left_border, left_bg) = if left_selected {
         (Color::Cyan, Color::Cyan, Color::Rgb(10, 40, 50))
     } else if focused {
-        (Color::Rgb(80, 140, 160), Color::Rgb(50, 90, 100), Color::Rgb(5, 18, 22))
+        (Color::Rgb(100, 100, 100), Color::Rgb(60, 60, 60), Color::Reset)
     } else {
         (Color::DarkGray, Color::DarkGray, Color::Reset)
     };
@@ -318,13 +321,13 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
     let (right_fg, right_border, right_bg) = if right_selected {
         (Color::Magenta, Color::Magenta, Color::Rgb(40, 10, 50))
     } else if focused {
-        (Color::Rgb(200, 120, 220), Color::Rgb(140, 80, 160), Color::Rgb(25, 8, 30))
+        (Color::Rgb(100, 100, 100), Color::Rgb(60, 60, 60), Color::Reset)
     } else {
         (Color::DarkGray, Color::DarkGray, Color::Reset)
     };
 
-    let left_title_fg = if focused || left_selected { Color::Cyan } else { Color::DarkGray };
-    let right_title_fg = if focused || right_selected { Color::Magenta } else { Color::DarkGray };
+    let left_title_fg = if left_selected { Color::Cyan } else if focused { Color::Rgb(100, 100, 100) } else { Color::DarkGray };
+    let right_title_fg = if right_selected { Color::Magenta } else if focused { Color::Rgb(100, 100, 100) } else { Color::DarkGray };
 
     // Left panel (ours / left branch)
     let left_block = Block::default()

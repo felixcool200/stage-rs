@@ -395,8 +395,8 @@ impl App {
             Message::CloseOverlay => {
                 self.overlay = Overlay::None;
             }
-            Message::MoveUp => self.handle_move_up(),
-            Message::MoveDown => self.handle_move_down(),
+            Message::MoveUp => self.handle_move_up()?,
+            Message::MoveDown => self.handle_move_down()?,
             Message::PrevHunk => {
                 if let Some(ds) = &mut self.diff_state {
                     if !ds.hunks.is_empty() && ds.current_hunk > 0 {
@@ -1178,7 +1178,7 @@ impl App {
         Ok(())
     }
 
-    fn handle_move_up(&mut self) {
+    fn handle_move_up(&mut self) -> Result<()> {
         match &mut self.overlay {
             Overlay::GitLog {
                 selected, scroll, ..
@@ -1189,46 +1189,47 @@ impl App {
                         *scroll = *selected;
                     }
                 }
-                return;
+                return Ok(());
             }
             Overlay::CommitInput { input, .. } => {
                 input.move_up();
-                return;
+                return Ok(());
             }
             Overlay::StashList { selected, .. } => {
                 if *selected > 0 {
                     *selected -= 1;
                 }
-                return;
+                return Ok(());
             }
             Overlay::BranchList { selected, creating: None, .. } => {
                 if *selected > 0 {
                     *selected -= 1;
                 }
-                return;
+                return Ok(());
             }
-            Overlay::BranchList { .. } => return,
+            Overlay::BranchList { .. } => return Ok(()),
             Overlay::CommitDetail { scroll, .. } => {
                 *scroll = scroll.saturating_sub(1);
-                return;
+                return Ok(());
             }
             Overlay::Rebase { selected, .. } => {
                 if *selected > 0 {
                     *selected -= 1;
                 }
-                return;
+                return Ok(());
             }
-            Overlay::Confirm { .. } => return,
+            Overlay::Confirm { .. } => return Ok(()),
             Overlay::None => {}
         }
 
         if self.active_panel == Panel::FileList {
             if self.selected_index > 0 {
                 self.selected_index -= 1;
+                self.load_selected_diff()?;
             }
-            return;
+            return Ok(());
         }
-        let Some(ds) = &mut self.diff_state else { return };
+        let Some(ds) = &mut self.diff_state else { return Ok(()) };
         match ds.view_mode {
             DiffViewMode::HunkNav => {
                 ds.scroll = ds.scroll.saturating_sub(1);
@@ -1244,9 +1245,10 @@ impl App {
                 }
             }
         }
+        Ok(())
     }
 
-    fn handle_move_down(&mut self) {
+    fn handle_move_down(&mut self) -> Result<()> {
         match &mut self.overlay {
             Overlay::GitLog {
                 entries,
@@ -1259,38 +1261,38 @@ impl App {
                         *scroll = selected.saturating_sub(19);
                     }
                 }
-                return;
+                return Ok(());
             }
             Overlay::CommitInput { input, .. } => {
                 input.move_down();
-                return;
+                return Ok(());
             }
             Overlay::StashList { entries, selected } => {
                 if *selected < entries.len().saturating_sub(1) {
                     *selected += 1;
                 }
-                return;
+                return Ok(());
             }
             Overlay::BranchList { entries, selected, creating: None, .. } => {
                 if *selected < entries.len().saturating_sub(1) {
                     *selected += 1;
                 }
-                return;
+                return Ok(());
             }
-            Overlay::BranchList { .. } => return,
+            Overlay::BranchList { .. } => return Ok(()),
             Overlay::CommitDetail { diff_lines, scroll, .. } => {
                 if *scroll < diff_lines.len().saturating_sub(1) {
                     *scroll += 1;
                 }
-                return;
+                return Ok(());
             }
             Overlay::Rebase { entries, selected, .. } => {
                 if *selected < entries.len().saturating_sub(1) {
                     *selected += 1;
                 }
-                return;
+                return Ok(());
             }
-            Overlay::Confirm { .. } => return,
+            Overlay::Confirm { .. } => return Ok(()),
             Overlay::None => {}
         }
 
@@ -1299,10 +1301,11 @@ impl App {
                 && self.selected_index < self.file_entries.len() - 1
             {
                 self.selected_index += 1;
+                self.load_selected_diff()?;
             }
-            return;
+            return Ok(());
         }
-        let Some(ds) = &mut self.diff_state else { return };
+        let Some(ds) = &mut self.diff_state else { return Ok(()) };
         match ds.view_mode {
             DiffViewMode::HunkNav => {
                 if ds.scroll < ds.max_scroll {
@@ -1320,6 +1323,7 @@ impl App {
                 }
             }
         }
+        Ok(())
     }
 
     fn stage_current_hunk(&mut self) -> Result<()> {

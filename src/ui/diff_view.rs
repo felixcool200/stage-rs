@@ -1,7 +1,7 @@
-use crate::app::{App, ConflictResolution, ConflictState, DiffViewMode, Panel};
+use crate::app::{App, ConflictResolution, ConflictState, DiffState, DiffViewMode, Panel};
 use crate::git::DiffLineKind;
 use crate::syntax;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -178,7 +178,79 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
         })
         .collect();
 
+    // Split area: main diff content + 1-col overview bar on the right
+    let [main_area, bar_area] = Layout::horizontal([
+        Constraint::Fill(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+
     let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, main_area);
+
+    render_change_overview(frame, ds, bar_area);
+}
+
+/// Render a 1-column-wide change overview bar showing where modifications are in the file.
+/// Green = added, Red = removed, DarkGray = equal, Cyan = viewport indicator.
+fn render_change_overview(frame: &mut Frame, ds: &DiffState, area: Rect) {
+    let bar_height = area.height as usize;
+    if bar_height == 0 {
+        return;
+    }
+
+    let total_lines = ds.right_lines.len().max(1);
+    let visible_height = bar_height; // each row of the bar maps to a portion of the file
+
+    // Build the bar: map each bar row to a file region
+    let mut bar_lines: Vec<Line> = Vec::with_capacity(bar_height);
+    for row in 0..bar_height {
+        let file_start = row * total_lines / bar_height;
+        let file_end = ((row + 1) * total_lines / bar_height).max(file_start + 1);
+
+        // Check what kinds of lines are in this region
+        let mut has_added = false;
+        let mut has_removed = false;
+        for i in file_start..file_end.min(ds.right_lines.len()) {
+            match ds.right_lines[i].kind {
+                DiffLineKind::Added => has_added = true,
+                DiffLineKind::Removed | DiffLineKind::Spacer => {
+                    if ds.right_lines[i].hunk_index.is_some() {
+                        has_removed = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Determine if this row overlaps the current viewport
+        let viewport_start = ds.scroll;
+        let viewport_end = ds.scroll + visible_height;
+        let in_viewport = file_start < viewport_end && file_end > viewport_start;
+
+        let (ch, color) = if has_added && has_removed {
+            ("┃", Color::Yellow)
+        } else if has_added {
+            ("┃", Color::Green)
+        } else if has_removed {
+            ("┃", Color::Red)
+        } else if in_viewport {
+            ("│", Color::DarkGray)
+        } else {
+            (" ", Color::DarkGray)
+        };
+
+        // Brighten viewport indicator
+        let bg = if in_viewport {
+            Color::Rgb(30, 30, 40)
+        } else {
+            Color::Reset
+        };
+
+        bar_lines.push(Line::from(Span::styled(ch, Style::default().fg(color).bg(bg))));
+    }
+
+    let paragraph = Paragraph::new(bar_lines);
     frame.render_widget(paragraph, area);
 }
 

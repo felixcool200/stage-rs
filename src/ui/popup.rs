@@ -1,4 +1,4 @@
-use crate::app::{App, Overlay};
+use crate::app::{App, Overlay, WhichKeyEntry};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -6,6 +6,12 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use ratatui::Frame;
 
 pub fn render(app: &App, frame: &mut Frame) {
+    // Render which-key popup if open
+    if let Some(entries) = &app.which_key {
+        render_which_key(frame, entries);
+        return;
+    }
+
     match &app.overlay {
         Overlay::None => {}
         Overlay::Confirm { message, .. } => {
@@ -394,6 +400,58 @@ fn render_stash_list(
     let mut state = ListState::default();
     state.select(Some(selected));
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_which_key(frame: &mut Frame, entries: &[WhichKeyEntry]) {
+    let cols = 3;
+    let rows = (entries.len() + cols - 1) / cols;
+    let popup_height = rows as u16 + 2; // +2 for borders
+    let area = frame.area();
+
+    // Position at the bottom of the screen
+    let popup_area = Rect {
+        x: area.x,
+        y: area.height.saturating_sub(popup_height + 1), // +1 for footer
+        width: area.width,
+        height: popup_height,
+    };
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let col_width = inner.width as usize / cols;
+
+    let mut lines: Vec<Line> = Vec::new();
+    for row in 0..rows {
+        let mut spans = Vec::new();
+        for col in 0..cols {
+            let idx = row + col * rows;
+            if let Some(entry) = entries.get(idx) {
+                spans.push(Span::styled(
+                    format!(" {}", entry.key),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                let label = format!(" {}", entry.label);
+                let pad = col_width.saturating_sub(2 + entry.label.len());
+                spans.push(Span::styled(
+                    label,
+                    Style::default().fg(Color::White),
+                ));
+                spans.push(Span::raw(" ".repeat(pad)));
+            }
+        }
+        lines.push(Line::from(spans));
+    }
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, inner);
 }
 
 /// Create a centered rectangle with the given percentage of width and height.

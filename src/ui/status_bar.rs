@@ -9,24 +9,6 @@ pub fn render_header(app: &App, frame: &mut Frame, area: Rect) {
     let branch = &app.branch_name;
     let file_count = app.file_entries.len();
 
-    let in_line_mode = app
-        .diff_state
-        .as_ref()
-        .map(|ds| ds.view_mode == DiffViewMode::LineNav)
-        .unwrap_or(false);
-
-    let keybinds = match (app.active_panel, in_line_mode) {
-        (Panel::FileList, _) => {
-            "  [s]tage [u]nstage [d]iscard [c]ommit [C]amend [z]undo [g]log [q]uit "
-        }
-        (Panel::DiffView, false) => {
-            "  [s]tage hunk [S]file Enter:select [i] edit [c]ommit [g]log [q]uit "
-        }
-        (Panel::DiffView, true) => {
-            "  Space:toggle [a]ll [s]tage [S]file [i] edit Esc:back [q]uit "
-        }
-    };
-
     let (ahead, behind) = app.ahead_behind;
     let mut ab_parts = Vec::new();
     if ahead > 0 {
@@ -53,7 +35,10 @@ pub fn render_header(app: &App, frame: &mut Frame, area: Rect) {
             format!(" {file_count} changes "),
             Style::default().fg(Color::White).bg(Color::DarkGray),
         ),
-        Span::styled(keybinds, Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            "  Space: commands  q: quit ",
+            Style::default().fg(Color::DarkGray),
+        ),
     ]);
 
     frame.render_widget(Paragraph::new(line), area);
@@ -114,12 +99,12 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     }
 
     let nav_hint = match (app.active_panel, in_line_mode) {
-        (Panel::FileList, _) => " | ↑/↓:navigate Enter:select Tab:diff ",
+        (Panel::FileList, _) => " | ↑/↓:navigate Enter:select Tab:diff Space:commands ",
         (Panel::DiffView, false) => {
-            " | ↑/↓:scroll Shift+↑/↓:hunks Enter:select i:edit Tab:files "
+            " | ↑/↓:scroll Shift+↑/↓:hunks Enter:lines Tab:files Space:commands "
         }
         (Panel::DiffView, true) => {
-            " | ↑/↓:lines Space:toggle s:stage i:edit Esc:back "
+            " | ↑/↓:lines Enter:toggle Esc:back Space:commands "
         }
     };
     spans.push(Span::styled(

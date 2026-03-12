@@ -67,6 +67,10 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             if let Some(msg) = poll_with_filter(app)? {
                 app.update(msg)?;
             }
+        } else if app.which_key.is_some() {
+            if let Some(msg) = poll_which_key(app)? {
+                app.update(msg)?;
+            }
         } else if let Some(msg) = event::poll_event(app)? {
             app.update(msg)?;
         }
@@ -153,6 +157,29 @@ fn spawn_editor(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Resul
     app.update(app::Message::Refresh)?;
 
     Ok(())
+}
+
+fn poll_which_key(app: &mut App) -> Result<Option<app::Message>> {
+    if !crossterm::event::poll(Duration::from_millis(250))? {
+        return Ok(None);
+    }
+    let crossterm::event::Event::Key(key) = crossterm::event::read()? else {
+        return Ok(None);
+    };
+    if key.kind != crossterm::event::KeyEventKind::Press {
+        return Ok(None);
+    }
+
+    let entries = app.which_key.take().unwrap();
+
+    if let crossterm::event::KeyCode::Char(ch) = key.code {
+        if let Some(entry) = entries.iter().find(|e| e.key == ch) {
+            return Ok(Some(entry.message.clone()));
+        }
+    }
+
+    // Any non-matching key (including Esc) closes the popup
+    Ok(None)
 }
 
 fn poll_branch_create(app: &mut App) -> Result<Option<app::Message>> {

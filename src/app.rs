@@ -25,6 +25,8 @@ pub struct App {
     pub show_blame: bool,
     /// Pending request to open $EDITOR
     pub pending_editor: Option<EditorRequest>,
+    /// Which-key popup entries (None = popup closed)
+    pub which_key: Option<Vec<WhichKeyEntry>>,
     /// Conflict resolver state
     pub conflict_state: Option<ConflictState>,
     /// Syntax highlighter
@@ -286,13 +288,21 @@ fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
 
 // ── Messages ─────────────────────────────────────────────────────────────────
 
-#[derive(Debug)]
+// ── Which-key popup ──────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+pub struct WhichKeyEntry {
+    pub key: char,
+    pub label: &'static str,
+    pub message: Message,
+}
+
+#[derive(Debug, Clone)]
 pub enum Message {
     MoveUp,
     MoveDown,
     PrevHunk,
     NextHunk,
-    SelectFile,
     SwitchPanel,
     StageFile,
     StageHunk,
@@ -302,7 +312,6 @@ pub enum Message {
     AutoRefresh,
     EnterLineMode,
     ExitLineMode,
-    SplitHunk,
     ToggleBlame,
     EnterEditMode,
     // Merge conflict resolution
@@ -345,6 +354,8 @@ pub enum Message {
     RebaseMoveUp,
     RebaseMoveDown,
     RebaseExecute,
+    // Which-key
+    OpenWhichKey,
     // Overlay actions (handled by overlay key routing, not keymap)
     CloseOverlay,
     ConfirmCommit,
@@ -378,6 +389,7 @@ impl App {
             blame_data: None,
             show_blame: false,
             pending_editor: None,
+            which_key: None,
             conflict_state: None,
             highlighter: Highlighter::new(),
         };
@@ -388,8 +400,68 @@ impl App {
         Ok(app)
     }
 
+    pub fn build_which_key_entries(&self) -> Vec<WhichKeyEntry> {
+        use Message::*;
+        let in_line_mode = self
+            .diff_state
+            .as_ref()
+            .map(|ds| ds.view_mode == DiffViewMode::LineNav)
+            .unwrap_or(false);
+
+        let mut entries = Vec::new();
+
+        match (self.active_panel, in_line_mode) {
+            (Panel::FileList, _) => {
+                entries.push(WhichKeyEntry { key: 's', label: "stage", message: StageFile });
+                entries.push(WhichKeyEntry { key: 'u', label: "unstage", message: UnstageFile });
+                entries.push(WhichKeyEntry { key: 'd', label: "discard", message: DiscardChanges });
+                entries.push(WhichKeyEntry { key: 'c', label: "commit", message: OpenCommit });
+                entries.push(WhichKeyEntry { key: 'C', label: "amend", message: OpenCommitAmend });
+                entries.push(WhichKeyEntry { key: 'z', label: "undo commit", message: UndoLastCommit });
+                entries.push(WhichKeyEntry { key: 'l', label: "log", message: OpenGitLog });
+                entries.push(WhichKeyEntry { key: 'f', label: "fetch", message: GitFetch });
+                entries.push(WhichKeyEntry { key: 'b', label: "branches", message: OpenBranchList });
+                entries.push(WhichKeyEntry { key: 'B', label: "blame", message: ToggleBlame });
+                entries.push(WhichKeyEntry { key: 'S', label: "stash", message: StashSave });
+                entries.push(WhichKeyEntry { key: 'W', label: "stash list", message: OpenStashList });
+                entries.push(WhichKeyEntry { key: 'y', label: "yank", message: YankToClipboard });
+                entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
+                entries.push(WhichKeyEntry { key: 'R', label: "resolve", message: OpenConflictResolver });
+            }
+            (Panel::DiffView, false) => {
+                entries.push(WhichKeyEntry { key: 's', label: "stage hunk", message: StageHunk });
+                entries.push(WhichKeyEntry { key: 'S', label: "stage file", message: StageFile });
+                entries.push(WhichKeyEntry { key: 'u', label: "unstage", message: UnstageFile });
+                entries.push(WhichKeyEntry { key: 'i', label: "edit", message: EnterEditMode });
+                entries.push(WhichKeyEntry { key: 'c', label: "commit", message: OpenCommit });
+                entries.push(WhichKeyEntry { key: 'C', label: "amend", message: OpenCommitAmend });
+                entries.push(WhichKeyEntry { key: 'z', label: "undo commit", message: UndoLastCommit });
+                entries.push(WhichKeyEntry { key: 'l', label: "log", message: OpenGitLog });
+                entries.push(WhichKeyEntry { key: 'f', label: "fetch", message: GitFetch });
+                entries.push(WhichKeyEntry { key: 'b', label: "branches", message: OpenBranchList });
+                entries.push(WhichKeyEntry { key: 'B', label: "blame", message: ToggleBlame });
+                entries.push(WhichKeyEntry { key: 'y', label: "yank", message: YankToClipboard });
+                entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
+            }
+            (Panel::DiffView, true) => {
+                entries.push(WhichKeyEntry { key: 's', label: "stage lines", message: StageLines });
+                entries.push(WhichKeyEntry { key: 'S', label: "stage file", message: StageFile });
+                entries.push(WhichKeyEntry { key: 'a', label: "select all", message: SelectAllLines });
+                entries.push(WhichKeyEntry { key: 'i', label: "edit", message: EnterEditMode });
+                entries.push(WhichKeyEntry { key: 'c', label: "commit", message: OpenCommit });
+                entries.push(WhichKeyEntry { key: 'C', label: "amend", message: OpenCommitAmend });
+                entries.push(WhichKeyEntry { key: 'y', label: "yank", message: YankToClipboard });
+                entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
+            }
+        }
+        entries
+    }
+
     pub fn update(&mut self, msg: Message) -> Result<()> {
         match msg {
+            Message::OpenWhichKey => {
+                self.which_key = Some(self.build_which_key_entries());
+            }
             Message::Quit => {
                 if self.overlay.is_active() {
                     self.overlay = Overlay::None;
@@ -417,9 +489,6 @@ impl App {
                         ds.scroll = ds.hunks[ds.current_hunk].display_start;
                     }
                 }
-            }
-            Message::SelectFile => {
-                self.load_selected_diff()?;
             }
             Message::SwitchPanel => {
                 if self.active_panel == Panel::DiffView {
@@ -507,44 +576,6 @@ impl App {
                     ds.selected_lines.clear();
                     ds.view_mode = DiffViewMode::LineNav;
                     self.status_message = None;
-                }
-            }
-            Message::SplitHunk => {
-                if let Some(ds) = &mut self.diff_state {
-                    if ds.hunks.is_empty() {
-                        self.status_message = Some("No hunks to split".into());
-                    } else {
-                        let hunk_idx = ds.current_hunk;
-                        let hunk = &ds.hunks[hunk_idx];
-                        // Find a split point: an equal line within the hunk
-                        let start = hunk.display_start;
-                        let end = hunk.display_end;
-                        let mut split_at = None;
-                        // Look for equal lines in the middle of the hunk
-                        for row in (start + 1)..end.saturating_sub(1) {
-                            if ds.left_lines.get(row).map(|l| l.kind == git::DiffLineKind::Equal).unwrap_or(false) {
-                                split_at = Some(row);
-                                break;
-                            }
-                        }
-                        if let Some(split_row) = split_at {
-                            // Split the hunk into two at split_row
-                            let h1 = git::Hunk {
-                                display_start: start,
-                                display_end: split_row,
-                                header: format!("{} (1/2)", hunk.header),
-                            };
-                            let h2 = git::Hunk {
-                                display_start: split_row,
-                                display_end: end,
-                                header: format!("{} (2/2)", hunk.header),
-                            };
-                            ds.hunks.splice(hunk_idx..=hunk_idx, [h1, h2]);
-                            self.status_message = Some("Hunk split".into());
-                        } else {
-                            self.status_message = Some("Cannot split: no context lines within hunk".into());
-                        }
-                    }
                 }
             }
             Message::EnterEditMode => {

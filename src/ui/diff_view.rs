@@ -216,7 +216,8 @@ enum LineHighlight {
     None,
     CurrentHunk,
     CursorLine,
-    SelectedLine,
+    SelectedStage,
+    SelectedUnstage,
 }
 
 fn get_line_highlight(
@@ -231,7 +232,7 @@ fn get_line_highlight(
     match ds.view_mode {
         DiffViewMode::LineNav => {
             if ds.selected_lines.contains(&display_row) {
-                LineHighlight::SelectedLine
+                if ds.is_staged { LineHighlight::SelectedUnstage } else { LineHighlight::SelectedStage }
             } else if display_row == ds.cursor_line {
                 LineHighlight::CursorLine
             } else {
@@ -407,7 +408,8 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight) -> (Style, Style) {
     let (bg, change_bg_boost) = match highlight {
         LineHighlight::CursorLine => (Color::Rgb(60, 55, 20), true),
-        LineHighlight::SelectedLine => (Color::Rgb(20, 50, 20), true),
+        LineHighlight::SelectedStage => (Color::Rgb(20, 50, 20), true),
+        LineHighlight::SelectedUnstage => (Color::Rgb(50, 20, 20), true),
         LineHighlight::CurrentHunk => (Color::Rgb(30, 30, 50), true),
         LineHighlight::None => (Color::Reset, false),
     };

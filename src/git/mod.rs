@@ -6,7 +6,7 @@ use color_eyre::Result;
 use git2::Repository;
 use std::path::Path;
 
-pub use diff::{compute_diff, DiffLine, DiffLineKind, LinePair};
+pub use diff::{apply_hunk, compute_diff, DiffLine, DiffLineKind, Hunk, LinePair};
 pub use status::{ChangeKind, FileEntry, FileStatus};
 
 pub struct GitRepo {
@@ -45,6 +45,10 @@ impl GitRepo {
 
     pub fn discard_changes(&self, path: &str) -> Result<()> {
         operations::discard_changes(&self.repo, path)
+    }
+
+    pub fn stage_content(&self, path: &str, content: &str) -> Result<()> {
+        operations::stage_content(&self.repo, path, content)
     }
 
     pub fn workdir(&self) -> &Path {

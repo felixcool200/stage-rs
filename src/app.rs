@@ -489,7 +489,9 @@ impl App {
                 if let Some(ds) = &mut self.diff_state {
                     if !ds.hunks.is_empty() && ds.current_hunk > 0 {
                         ds.current_hunk -= 1;
-                        ds.scroll = ds.hunks[ds.current_hunk].display_start;
+                        let start = ds.hunks[ds.current_hunk].display_start;
+                        let offset = ds.viewport_height / 3;
+                        ds.scroll = start.saturating_sub(offset);
                     }
                 }
             }
@@ -497,7 +499,9 @@ impl App {
                 if let Some(ds) = &mut self.diff_state {
                     if !ds.hunks.is_empty() && ds.current_hunk < ds.hunks.len() - 1 {
                         ds.current_hunk += 1;
-                        ds.scroll = ds.hunks[ds.current_hunk].display_start;
+                        let start = ds.hunks[ds.current_hunk].display_start;
+                        let offset = ds.viewport_height / 3;
+                        ds.scroll = start.saturating_sub(offset);
                     }
                 }
             }
@@ -598,8 +602,8 @@ impl App {
                     ds.hunk_changed_rows = all_changed;
                     ds.view_mode = DiffViewMode::LineNav;
                     self.status_message = None;
-                    // Center scroll on cursor
-                    self.center_diff_scroll();
+                    // Only adjust scroll if cursor is off-screen
+                    Self::keep_cursor_visible(ds);
                 }
             }
             Message::EnterEditMode => {
@@ -772,8 +776,9 @@ impl App {
                     ));
                     ds.view_mode = DiffViewMode::HunkNav;
                     ds.selected_lines.clear();
+                    let offset = ds.viewport_height / 3;
                     ds.scroll = ds.hunks.get(ds.current_hunk)
-                        .map(|h| h.display_start)
+                        .map(|h| h.display_start.saturating_sub(offset))
                         .unwrap_or(0);
                     self.status_message = None;
                 }
@@ -1524,13 +1529,6 @@ impl App {
         None
     }
 
-    /// Scroll the diff view so cursor_line is roughly 1/3 from the top.
-    fn center_diff_scroll(&mut self) {
-        if let Some(ds) = &mut self.diff_state {
-            let offset = ds.viewport_height / 3;
-            ds.scroll = ds.cursor_line.saturating_sub(offset);
-        }
-    }
 
     /// Scroll just enough to keep cursor_line visible, placing it 1/3 from top/bottom edge.
     fn keep_cursor_visible(ds: &mut DiffState) {
@@ -1570,12 +1568,13 @@ impl App {
                     let prev_cursor = prev.map(|ds| ds.cursor_line).unwrap_or(0);
                     let prev_selected = prev.map(|ds| ds.selected_lines.clone()).unwrap_or_default();
                     let prev_hunk_rows = prev.map(|ds| ds.hunk_changed_rows.clone()).unwrap_or_default();
+                    let prev_viewport = prev.map(|ds| ds.viewport_height).unwrap_or(24);
+                    let offset = prev_viewport / 3;
                     let scroll = hunks
                         .get(prev_hunk)
-                        .map(|h| h.display_start)
+                        .map(|h| h.display_start.saturating_sub(offset))
                         .unwrap_or(0);
                     let prev_saved = prev.and_then(|ds| ds.saved_line_selection.clone());
-                    let prev_viewport = prev.map(|ds| ds.viewport_height).unwrap_or(24);
                     self.diff_state = Some(DiffState {
                         file_path: path,
                         left_lines,

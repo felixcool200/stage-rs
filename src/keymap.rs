@@ -50,6 +50,15 @@ pub fn resolve(keymap: KeymapName, ctx: InputContext, key: KeyEvent) -> Option<M
         }
     }
 
+    // Shift+j/k or Shift+arrows: jump hunk-by-hunk in diff view
+    if key.modifiers.contains(KeyModifiers::SHIFT) {
+        match key.code {
+            KeyCode::Char('J') | KeyCode::Down => return Some(Message::NextHunk),
+            KeyCode::Char('K') | KeyCode::Up => return Some(Message::PrevHunk),
+            _ => {}
+        }
+    }
+
     // Shared navigation (both keymaps use h/j/k/l and arrows)
     match key.code {
         KeyCode::Char('q') => return Some(Message::Quit),

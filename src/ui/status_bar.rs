@@ -125,10 +125,10 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     let nav_hint = match (app.active_panel, in_line_mode, app.keymap) {
         (Panel::FileList, _, _) => " | j/k:navigate Enter:select Tab:diff Ctrl+K:keymap ",
         (Panel::DiffView, false, KeymapName::Vim) => {
-            " | j/k:hunks Enter:lines Tab:files Ctrl+K:keymap "
+            " | j/k:scroll J/K:hunks Enter:lines Tab:files Ctrl+K:keymap "
         }
         (Panel::DiffView, false, KeymapName::Helix) => {
-            " | j/k:hunks v:lines Tab:files Ctrl+K:keymap "
+            " | j/k:scroll J/K:hunks v:lines Tab:files Ctrl+K:keymap "
         }
         (Panel::DiffView, true, KeymapName::Vim) => {
             " | j/k:lines Space:toggle s:stage Esc:back "

@@ -294,6 +294,8 @@ fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
 pub enum Message {
     MoveUp,
     MoveDown,
+    PrevHunk,
+    NextHunk,
     SelectFile,
     SwitchPanel,
     StageFile,
@@ -407,6 +409,22 @@ impl App {
             }
             Message::MoveUp => self.handle_move_up(),
             Message::MoveDown => self.handle_move_down(),
+            Message::PrevHunk => {
+                if let Some(ds) = &mut self.diff_state {
+                    if !ds.hunks.is_empty() && ds.current_hunk > 0 {
+                        ds.current_hunk -= 1;
+                        ds.scroll = ds.hunks[ds.current_hunk].display_start;
+                    }
+                }
+            }
+            Message::NextHunk => {
+                if let Some(ds) = &mut self.diff_state {
+                    if !ds.hunks.is_empty() && ds.current_hunk < ds.hunks.len() - 1 {
+                        ds.current_hunk += 1;
+                        ds.scroll = ds.hunks[ds.current_hunk].display_start;
+                    }
+                }
+            }
             Message::SelectFile => {
                 self.load_selected_diff()?;
             }
@@ -1288,12 +1306,7 @@ impl App {
         let Some(ds) = &mut self.diff_state else { return };
         match ds.view_mode {
             DiffViewMode::HunkNav => {
-                if ds.hunks.is_empty() {
-                    ds.scroll = ds.scroll.saturating_sub(1);
-                } else if ds.current_hunk > 0 {
-                    ds.current_hunk -= 1;
-                    ds.scroll = ds.hunks[ds.current_hunk].display_start;
-                }
+                ds.scroll = ds.scroll.saturating_sub(1);
             }
             DiffViewMode::LineNav => {
                 if let Some(pos) = ds.hunk_changed_rows.iter().position(|&r| r == ds.cursor_line) {
@@ -1373,13 +1386,8 @@ impl App {
         let Some(ds) = &mut self.diff_state else { return };
         match ds.view_mode {
             DiffViewMode::HunkNav => {
-                if ds.hunks.is_empty() {
-                    if ds.scroll < ds.max_scroll {
-                        ds.scroll += 1;
-                    }
-                } else if ds.current_hunk < ds.hunks.len() - 1 {
-                    ds.current_hunk += 1;
-                    ds.scroll = ds.hunks[ds.current_hunk].display_start;
+                if ds.scroll < ds.max_scroll {
+                    ds.scroll += 1;
                 }
             }
             DiffViewMode::LineNav => {

@@ -1,9 +1,9 @@
 use crate::app::{App, Panel};
 use crate::git::FileStatus;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
@@ -14,25 +14,53 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         Color::DarkGray
     };
 
+    let filtering = app.file_filter.is_some();
+    let title = if filtering {
+        " Source Control (filtering) "
+    } else {
+        " Source Control "
+    };
+
     let block = Block::default()
-        .title(" Source Control ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
+
+    // Reserve a line at the bottom for filter input when filtering
+    let (list_area, filter_area) = if filtering {
+        let inner = block.inner(area);
+        let [la, fa] = Layout::vertical([
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .areas(inner);
+        (la, Some(fa))
+    } else {
+        (block.inner(area), None)
+    };
+
+    frame.render_widget(block, area);
+
+    let filtered = app.filtered_entries();
+    let filtered_indices: std::collections::HashSet<usize> = filtered.iter().map(|(i, _)| *i).collect();
 
     let mut items: Vec<ListItem> = Vec::new();
     let mut list_index_to_entry: Vec<Option<usize>> = Vec::new();
     let mut current_section: Option<&str> = None;
 
     for (i, entry) in app.file_entries.iter().enumerate() {
+        if filtering && !filtered_indices.contains(&i) {
+            continue;
+        }
+
         let section = entry.status.section_name();
         if current_section != Some(section) {
             current_section = Some(section);
-            // Add section header
-            let count = app
-                .file_entries
-                .iter()
-                .filter(|e| e.status.section_name() == section)
-                .count();
+            let count = if filtering {
+                filtered.iter().filter(|(_, e)| e.status.section_name() == section).count()
+            } else {
+                app.file_entries.iter().filter(|e| e.status.section_name() == section).count()
+            };
             items.push(ListItem::new(Line::from(vec![Span::styled(
                 format!(" {section} ({count})"),
                 Style::default()
@@ -96,7 +124,6 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .position(|e| *e == Some(app.selected_index));
 
     let list = List::new(items)
-        .block(block)
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
@@ -105,5 +132,15 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
     let mut state = ListState::default();
     state.select(display_index);
-    frame.render_stateful_widget(list, area, &mut state);
+    frame.render_stateful_widget(list, list_area, &mut state);
+
+    // Render filter input
+    if let (Some(fa), Some(ref filter_text)) = (filter_area, &app.file_filter) {
+        let line = Line::from(vec![
+            Span::styled("/", Style::default().fg(Color::Cyan)),
+            Span::styled(filter_text.as_str(), Style::default().fg(Color::White)),
+            Span::styled("_", Style::default().fg(Color::White).add_modifier(Modifier::SLOW_BLINK)),
+        ]);
+        frame.render_widget(Paragraph::new(line), fa);
+    }
 }

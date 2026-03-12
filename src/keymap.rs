@@ -68,6 +68,13 @@ pub fn resolve(keymap: KeymapName, ctx: InputContext, key: KeyEvent) -> Option<M
         _ => {}
     }
 
+    // File list only bindings
+    if ctx == InputContext::FileList {
+        if key.code == KeyCode::Char('/') {
+            return Some(Message::StartFilter);
+        }
+    }
+
     match keymap {
         KeymapName::Vim => resolve_vim(ctx, key),
         KeymapName::Helix => resolve_helix(ctx, key),

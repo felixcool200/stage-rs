@@ -19,6 +19,8 @@ pub struct App {
     pub overlay: Overlay,
     /// Saved commit message from undo, pre-filled on next commit
     pub saved_commit_msg: Option<String>,
+    /// File list filter (None = not filtering)
+    pub file_filter: Option<String>,
 }
 
 pub struct DiffState {
@@ -216,6 +218,9 @@ pub enum Message {
     SelectAllLines,
     CycleKeymap,
     YankToClipboard,
+    // Filter
+    StartFilter,
+    ClearFilter,
     // Stash
     StashSave,
     OpenStashList,
@@ -257,6 +262,7 @@ impl App {
             keymap,
             overlay: Overlay::None,
             saved_commit_msg: None,
+            file_filter: None,
         })
     }
 
@@ -411,6 +417,14 @@ impl App {
                         }
                     }
                 }
+            }
+
+            // ── Filter ────────────────────────────────────────────────────
+            Message::StartFilter => {
+                self.file_filter = Some(String::new());
+            }
+            Message::ClearFilter => {
+                self.file_filter = None;
             }
 
             // ── Stash ─────────────────────────────────────────────────────
@@ -822,6 +836,19 @@ impl App {
             self.selected_index = self.file_entries.len().saturating_sub(1);
         }
         Ok(())
+    }
+
+    pub fn filtered_entries(&self) -> Vec<(usize, &FileEntry)> {
+        self.file_entries.iter().enumerate().filter(|(_, e)| {
+            match &self.file_filter {
+                None => true,
+                Some(f) if f.is_empty() => true,
+                Some(f) => {
+                    let lower = e.path.to_lowercase();
+                    f.to_lowercase().split_whitespace().all(|w| lower.contains(w))
+                }
+            }
+        }).collect()
     }
 
     fn get_yank_text(&self) -> Option<String> {

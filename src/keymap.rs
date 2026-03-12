@@ -66,6 +66,9 @@ pub fn resolve(keymap: KeymapName, ctx: InputContext, key: KeyEvent) -> Option<M
         KeyCode::Char('Z') => return Some(Message::StashSave),
         KeyCode::Char('W') => return Some(Message::OpenStashList),
         KeyCode::Char('b') => return Some(Message::OpenBranchList),
+        KeyCode::Char('P') => return Some(Message::GitPush),
+        KeyCode::Char('p') => return Some(Message::GitPull),
+        KeyCode::Char('F') => return Some(Message::GitFetch),
         _ => {}
     }
 

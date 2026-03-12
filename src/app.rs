@@ -232,6 +232,10 @@ pub enum Message {
     StashPop,
     StashApply,
     StashDrop,
+    // Remote
+    GitPush,
+    GitPull,
+    GitFetch,
     // Branches
     OpenBranchList,
     CheckoutBranch,
@@ -435,6 +439,41 @@ impl App {
             }
             Message::ClearFilter => {
                 self.file_filter = None;
+            }
+
+            // ── Remote ────────────────────────────────────────────────────
+            Message::GitPush => {
+                self.status_message = Some("Pushing...".into());
+                match self.repo.push() {
+                    Ok(msg) => {
+                        self.status_message = Some(format!("Push: {msg}"));
+                        self.refresh()?;
+                    }
+                    Err(e) => self.status_message = Some(format!("Push failed: {e}")),
+                }
+            }
+            Message::GitPull => {
+                self.status_message = Some("Pulling...".into());
+                match self.repo.pull() {
+                    Ok(msg) => {
+                        self.status_message = Some(format!("Pull: {msg}"));
+                        self.refresh()?;
+                        if self.diff_state.is_some() {
+                            self.load_selected_diff()?;
+                        }
+                    }
+                    Err(e) => self.status_message = Some(format!("Pull failed: {e}")),
+                }
+            }
+            Message::GitFetch => {
+                self.status_message = Some("Fetching...".into());
+                match self.repo.fetch() {
+                    Ok(msg) => {
+                        self.status_message = Some(format!("Fetch: {msg}"));
+                        self.refresh()?;
+                    }
+                    Err(e) => self.status_message = Some(format!("Fetch failed: {e}")),
+                }
             }
 
             // ── Branches ──────────────────────────────────────────────────

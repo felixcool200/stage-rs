@@ -114,6 +114,18 @@ impl GitRepo {
         operations::create_branch(&self.repo, name)
     }
 
+    pub fn push(&self) -> Result<String> {
+        operations::git_push(self.workdir())
+    }
+
+    pub fn pull(&self) -> Result<String> {
+        operations::git_pull(self.workdir())
+    }
+
+    pub fn fetch(&self) -> Result<String> {
+        operations::git_fetch(self.workdir())
+    }
+
     /// Returns (ahead, behind) relative to the upstream tracking branch.
     /// Returns (0, 0) if no upstream is configured.
     pub fn ahead_behind(&self) -> (usize, usize) {

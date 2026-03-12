@@ -197,6 +197,53 @@ pub fn stash_list(repo: &mut Repository) -> Result<Vec<StashEntry>> {
     Ok(entries)
 }
 
+// ── Branches ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct BranchEntry {
+    pub name: String,
+    pub is_current: bool,
+    pub is_remote: bool,
+}
+
+pub fn list_branches(repo: &Repository) -> Result<Vec<BranchEntry>> {
+    let mut entries = Vec::new();
+    let branches = repo.branches(Some(git2::BranchType::Local))?;
+    for b in branches {
+        let (branch, _) = b?;
+        let name = branch.name()?.unwrap_or("").to_string();
+        let is_current = branch.is_head();
+        entries.push(BranchEntry { name, is_current, is_remote: false });
+    }
+    // Also list remote branches
+    let remote_branches = repo.branches(Some(git2::BranchType::Remote))?;
+    for b in remote_branches {
+        let (branch, _) = b?;
+        let name = branch.name()?.unwrap_or("").to_string();
+        entries.push(BranchEntry { name, is_current: false, is_remote: true });
+    }
+    Ok(entries)
+}
+
+pub fn checkout_branch(repo: &Repository, name: &str) -> Result<()> {
+    let (obj, reference) = repo.revparse_ext(name)?;
+    repo.checkout_tree(&obj, Some(CheckoutBuilder::new().force()))?;
+    match reference {
+        Some(r) => repo.set_head(r.name().unwrap_or(&format!("refs/heads/{name}")))?,
+        None => repo.set_head_detached(obj.id())?,
+    }
+    Ok(())
+}
+
+pub fn create_branch(repo: &Repository, name: &str) -> Result<()> {
+    let head = repo.head().map_err(|_| eyre!("No HEAD"))?;
+    let commit = head.peel_to_commit()?;
+    repo.branch(name, &commit, false)?;
+    // Checkout the new branch
+    checkout_branch(repo, name)?;
+    Ok(())
+}
+
 pub fn has_staged_changes(repo: &Repository) -> bool {
     let Ok(statuses) = repo.statuses(None) else {
         return false;

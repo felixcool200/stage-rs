@@ -62,8 +62,13 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|frame| ui::render(app, frame))?;
 
+        let branch_creating = matches!(app.overlay, Overlay::BranchList { creating: Some(_), .. });
         if matches!(app.overlay, Overlay::CommitInput { .. }) {
             if let Some(msg) = poll_with_text_input(app)? {
+                app.update(msg)?;
+            }
+        } else if branch_creating {
+            if let Some(msg) = poll_branch_create(app)? {
                 app.update(msg)?;
             }
         } else if app.file_filter.is_some() {
@@ -79,6 +84,44 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn poll_branch_create(app: &mut App) -> Result<Option<app::Message>> {
+    if !crossterm::event::poll(Duration::from_millis(250))? {
+        return Ok(None);
+    }
+    let crossterm::event::Event::Key(key) = crossterm::event::read()? else {
+        return Ok(None);
+    };
+    if key.kind != crossterm::event::KeyEventKind::Press {
+        return Ok(None);
+    }
+    use crossterm::event::{KeyCode, KeyModifiers};
+    match (key.modifiers, key.code) {
+        (_, KeyCode::Esc) => {
+            if let Overlay::BranchList { ref mut creating, .. } = app.overlay {
+                *creating = None;
+            }
+        }
+        (_, KeyCode::Enter) => {
+            return Ok(Some(app::Message::ConfirmCreateBranch));
+        }
+        (_, KeyCode::Backspace) => {
+            if let Overlay::BranchList { creating: Some(ref mut name), .. } = app.overlay {
+                name.pop();
+            }
+        }
+        (_, KeyCode::Char(ch)) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+            if let Overlay::BranchList { creating: Some(ref mut name), .. } = app.overlay {
+                name.push(ch);
+            }
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+            return Ok(Some(app::Message::Quit));
+        }
+        _ => {}
+    }
+    Ok(None)
 }
 
 fn poll_with_filter(app: &mut App) -> Result<Option<app::Message>> {

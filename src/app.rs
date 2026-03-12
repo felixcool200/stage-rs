@@ -1,4 +1,4 @@
-use crate::git::{self, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair, LogEntry, StashEntry};
+use crate::git::{self, BranchEntry, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair, LogEntry, StashEntry};
 use crate::keymap::KeymapName;
 use color_eyre::Result;
 use std::collections::BTreeSet;
@@ -72,6 +72,11 @@ pub enum Overlay {
     StashList {
         entries: Vec<StashEntry>,
         selected: usize,
+    },
+    BranchList {
+        entries: Vec<BranchEntry>,
+        selected: usize,
+        creating: Option<String>,
     },
 }
 
@@ -227,6 +232,11 @@ pub enum Message {
     StashPop,
     StashApply,
     StashDrop,
+    // Branches
+    OpenBranchList,
+    CheckoutBranch,
+    StartCreateBranch,
+    ConfirmCreateBranch,
     // Commit / log
     OpenCommit,
     OpenCommitAmend,
@@ -425,6 +435,71 @@ impl App {
             }
             Message::ClearFilter => {
                 self.file_filter = None;
+            }
+
+            // ── Branches ──────────────────────────────────────────────────
+            Message::OpenBranchList => {
+                match self.repo.list_branches() {
+                    Ok(entries) => {
+                        let sel = entries.iter().position(|b| b.is_current).unwrap_or(0);
+                        self.overlay = Overlay::BranchList {
+                            entries,
+                            selected: sel,
+                            creating: None,
+                        };
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Branch list failed: {e}"));
+                    }
+                }
+            }
+            Message::CheckoutBranch => {
+                if let Overlay::BranchList { entries, selected, .. } = &self.overlay {
+                    if let Some(entry) = entries.get(*selected) {
+                        let name = if entry.is_remote {
+                            // For remote branches like "origin/foo", checkout as local "foo"
+                            entry.name.split('/').skip(1).collect::<Vec<_>>().join("/")
+                        } else {
+                            entry.name.clone()
+                        };
+                        self.overlay = Overlay::None;
+                        match self.repo.checkout_branch(&name) {
+                            Ok(()) => {
+                                self.status_message = Some(format!("Switched to {name}"));
+                                self.refresh()?;
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Checkout failed: {e}"));
+                            }
+                        }
+                    }
+                }
+            }
+            Message::StartCreateBranch => {
+                if let Overlay::BranchList { ref mut creating, .. } = self.overlay {
+                    *creating = Some(String::new());
+                }
+            }
+            Message::ConfirmCreateBranch => {
+                if let Overlay::BranchList { creating, .. } = &self.overlay {
+                    if let Some(name) = creating {
+                        let name = name.clone();
+                        if name.is_empty() {
+                            self.status_message = Some("Branch name cannot be empty".into());
+                        } else {
+                            self.overlay = Overlay::None;
+                            match self.repo.create_branch(&name) {
+                                Ok(()) => {
+                                    self.status_message = Some(format!("Created and switched to {name}"));
+                                    self.refresh()?;
+                                }
+                                Err(e) => {
+                                    self.status_message = Some(format!("Create branch failed: {e}"));
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // ── Stash ─────────────────────────────────────────────────────
@@ -668,6 +743,13 @@ impl App {
                 }
                 return;
             }
+            Overlay::BranchList { selected, creating: None, .. } => {
+                if *selected > 0 {
+                    *selected -= 1;
+                }
+                return;
+            }
+            Overlay::BranchList { .. } => return,
             Overlay::Confirm { .. } => return,
             Overlay::None => {}
         }
@@ -726,6 +808,13 @@ impl App {
                 }
                 return;
             }
+            Overlay::BranchList { entries, selected, creating: None, .. } => {
+                if *selected < entries.len().saturating_sub(1) {
+                    *selected += 1;
+                }
+                return;
+            }
+            Overlay::BranchList { .. } => return,
             Overlay::Confirm { .. } => return,
             Overlay::None => {}
         }

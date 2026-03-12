@@ -37,6 +37,7 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
             Overlay::CommitInput { .. } => handle_commit_input(key.modifiers, key.code),
             Overlay::GitLog { .. } => handle_git_log(key.code),
             Overlay::StashList { .. } => handle_stash_list(key.code),
+            Overlay::BranchList { .. } => handle_branch_list(key.code),
             Overlay::None => unreachable!(),
         });
     }
@@ -91,6 +92,17 @@ fn handle_stash_list(code: KeyCode) -> Option<Message> {
         KeyCode::Char('p') | KeyCode::Enter => Some(Message::StashPop),
         KeyCode::Char('a') => Some(Message::StashApply),
         KeyCode::Char('d') => Some(Message::StashDrop),
+        _ => None,
+    }
+}
+
+fn handle_branch_list(code: KeyCode) -> Option<Message> {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseOverlay),
+        KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
+        KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
+        KeyCode::Enter => Some(Message::CheckoutBranch),
+        KeyCode::Char('n') => Some(Message::StartCreateBranch),
         _ => None,
     }
 }

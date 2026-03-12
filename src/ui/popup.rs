@@ -24,6 +24,9 @@ pub fn render(app: &App, frame: &mut Frame) {
         Overlay::StashList { entries, selected } => {
             render_stash_list(frame, entries, *selected);
         }
+        Overlay::BranchList { entries, selected, creating } => {
+            render_branch_list(frame, entries, *selected, creating.as_deref());
+        }
     }
 }
 
@@ -181,6 +184,76 @@ fn render_git_log(
     let mut state = ListState::default();
     state.select(Some(selected));
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_branch_list(
+    frame: &mut Frame,
+    entries: &[crate::git::BranchEntry],
+    selected: usize,
+    creating: Option<&str>,
+) {
+    let area = centered_rect(60, 60, frame.area());
+    frame.render_widget(Clear, area);
+
+    let title = if creating.is_some() {
+        " New Branch (Enter to create, Esc to cancel) "
+    } else {
+        " Branches [Enter]checkout [n]ew [q]close "
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if let Some(name) = creating {
+        let lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Branch name:",
+                Style::default().fg(Color::White),
+            )),
+            Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(name, Style::default().fg(Color::Cyan)),
+                Span::styled("_", Style::default().fg(Color::White).add_modifier(Modifier::SLOW_BLINK)),
+            ]),
+        ];
+        let paragraph = Paragraph::new(lines);
+        frame.render_widget(paragraph, inner);
+        return;
+    }
+
+    let items: Vec<ListItem> = entries
+        .iter()
+        .map(|e| {
+            let marker = if e.is_current { "* " } else { "  " };
+            let name_color = if e.is_current {
+                Color::Green
+            } else if e.is_remote {
+                Color::Red
+            } else {
+                Color::White
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(marker, Style::default().fg(Color::Green)),
+                Span::styled(&e.name, Style::default().fg(name_color)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items).highlight_style(
+        Style::default()
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD),
+    );
+
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    frame.render_stateful_widget(list, inner, &mut state);
 }
 
 fn render_stash_list(

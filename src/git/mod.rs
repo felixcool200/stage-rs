@@ -9,7 +9,7 @@ use std::path::Path;
 
 pub use diff::{apply_hunk, apply_lines, changed_rows_in_hunk, compute_diff, DiffLine, DiffLineKind, Hunk, LinePair};
 pub use log::LogEntry;
-pub use operations::StashEntry;
+pub use operations::{BranchEntry, StashEntry};
 pub use status::{ChangeKind, FileEntry, FileStatus};
 
 pub struct GitRepo {
@@ -100,6 +100,18 @@ impl GitRepo {
 
     pub fn stash_list(&mut self) -> Result<Vec<StashEntry>> {
         operations::stash_list(&mut self.repo)
+    }
+
+    pub fn list_branches(&self) -> Result<Vec<BranchEntry>> {
+        operations::list_branches(&self.repo)
+    }
+
+    pub fn checkout_branch(&self, name: &str) -> Result<()> {
+        operations::checkout_branch(&self.repo, name)
+    }
+
+    pub fn create_branch(&self, name: &str) -> Result<()> {
+        operations::create_branch(&self.repo, name)
     }
 
     /// Returns (ahead, behind) relative to the upstream tracking branch.

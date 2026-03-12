@@ -224,6 +224,7 @@ pub enum Message {
     AutoRefresh,
     EnterLineMode,
     ExitLineMode,
+    SplitHunk,
     ToggleLine,
     StageLines,
     SelectAllLines,
@@ -383,6 +384,44 @@ impl App {
                         KeymapName::Vim => "Line mode: j/k navigate, Space toggle, a all, s stage, Esc back".into(),
                         KeymapName::Helix => "Line mode: j/k navigate, x toggle, X all, s stage, Esc back".into(),
                     });
+                }
+            }
+            Message::SplitHunk => {
+                if let Some(ds) = &mut self.diff_state {
+                    if ds.hunks.is_empty() {
+                        self.status_message = Some("No hunks to split".into());
+                    } else {
+                        let hunk_idx = ds.current_hunk;
+                        let hunk = &ds.hunks[hunk_idx];
+                        // Find a split point: an equal line within the hunk
+                        let start = hunk.display_start;
+                        let end = hunk.display_end;
+                        let mut split_at = None;
+                        // Look for equal lines in the middle of the hunk
+                        for row in (start + 1)..end.saturating_sub(1) {
+                            if ds.left_lines.get(row).map(|l| l.kind == git::DiffLineKind::Equal).unwrap_or(false) {
+                                split_at = Some(row);
+                                break;
+                            }
+                        }
+                        if let Some(split_row) = split_at {
+                            // Split the hunk into two at split_row
+                            let h1 = git::Hunk {
+                                display_start: start,
+                                display_end: split_row,
+                                header: format!("{} (1/2)", hunk.header),
+                            };
+                            let h2 = git::Hunk {
+                                display_start: split_row,
+                                display_end: end,
+                                header: format!("{} (2/2)", hunk.header),
+                            };
+                            ds.hunks.splice(hunk_idx..=hunk_idx, [h1, h2]);
+                            self.status_message = Some("Hunk split".into());
+                        } else {
+                            self.status_message = Some("Cannot split: no context lines within hunk".into());
+                        }
+                    }
                 }
             }
             Message::ExitLineMode => {

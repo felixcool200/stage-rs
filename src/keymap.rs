@@ -102,6 +102,7 @@ fn resolve_vim(ctx: InputContext, key: KeyEvent) -> Option<Message> {
             KeyCode::Char('s') => Some(Message::StageHunk),
             KeyCode::Char('S') => Some(Message::StageFile),
             KeyCode::Char('u') => Some(Message::UnstageFile),
+            KeyCode::Char('x') => Some(Message::SplitHunk),
             _ => None,
         },
         InputContext::DiffLineNav => match key.code {
@@ -141,6 +142,7 @@ fn resolve_helix(ctx: InputContext, key: KeyEvent) -> Option<Message> {
             KeyCode::Char('s') => Some(Message::StageHunk),
             KeyCode::Char('S') => Some(Message::StageFile),
             KeyCode::Char('u') => Some(Message::UnstageFile),
+            KeyCode::Char('/') => Some(Message::SplitHunk),
             _ => None,
         },
         InputContext::DiffLineNav => match key.code {

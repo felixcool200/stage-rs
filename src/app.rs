@@ -503,7 +503,7 @@ impl App {
                     ds.hunk_changed_rows = changed;
                     ds.selected_lines.clear();
                     ds.view_mode = DiffViewMode::LineNav;
-                    self.status_message = Some("Line mode: ↑/↓ navigate, Space toggle, a all, s stage, Esc back".into());
+                    self.status_message = None;
                 }
             }
             Message::SplitHunk => {
@@ -549,9 +549,27 @@ impl App {
                     let path = ds.file_path.clone();
                     let workdir = self.repo.workdir().to_path_buf();
                     let full_path = workdir.join(&path);
+
+                    // Map current diff scroll position to a file line number.
+                    // Count non-spacer lines in right_lines up to the scroll position.
+                    let target_line = {
+                        let scroll = ds.scroll;
+                        let mut file_line: usize = 0;
+                        for (i, dl) in ds.right_lines.iter().enumerate() {
+                            if i >= scroll {
+                                break;
+                            }
+                            if dl.kind != git::DiffLineKind::Spacer {
+                                file_line += 1;
+                            }
+                        }
+                        file_line
+                    };
+
                     match std::fs::read_to_string(&full_path) {
                         Ok(content) => {
                             let lines: Vec<String> = content.lines().map(String::from).collect();
+                            let line_count = lines.len();
                             let mut textarea = tui_textarea::TextArea::new(lines);
                             textarea.set_line_number_style(
                                 ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray),
@@ -559,11 +577,16 @@ impl App {
                             textarea.set_cursor_line_style(
                                 ratatui::style::Style::default().bg(ratatui::style::Color::Rgb(40, 40, 60)),
                             );
+                            // Move cursor to the mapped file line
+                            let goto = target_line.min(line_count.saturating_sub(1));
+                            for _ in 0..goto {
+                                textarea.move_cursor(tui_textarea::CursorMove::Down);
+                            }
                             self.edit_state = Some(EditState {
                                 file_path: path,
                                 textarea,
                             });
-                            self.status_message = Some("Edit mode: Ctrl+S save, Esc exit".into());
+                            self.status_message = Some("-- INSERT --".into());
                         }
                         Err(e) => {
                             self.status_message = Some(format!("Cannot read file: {e}"));
@@ -575,7 +598,11 @@ impl App {
             }
             Message::ExitEditMode => {
                 self.edit_state = None;
-                self.status_message = Some("Edit mode closed".into());
+                // Reload diff to reflect any saved changes
+                if self.diff_state.is_some() {
+                    self.load_selected_diff()?;
+                }
+                self.status_message = None;
             }
             Message::SaveEdit => {
                 if let Some(edit) = &self.edit_state {

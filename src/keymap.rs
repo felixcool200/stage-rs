@@ -72,7 +72,7 @@ fn resolve_context(ctx: InputContext, key: KeyEvent) -> Option<Message> {
             KeyCode::Char('S') => Some(Message::StageFile),
             KeyCode::Char('u') => Some(Message::UnstageFile),
             KeyCode::Char('x') => Some(Message::SplitHunk),
-            KeyCode::Char('e') => Some(Message::EnterEditMode),
+            KeyCode::Char('i') => Some(Message::EnterEditMode),
             _ => None,
         },
         InputContext::DiffLineNav => match key.code {
@@ -80,6 +80,7 @@ fn resolve_context(ctx: InputContext, key: KeyEvent) -> Option<Message> {
             KeyCode::Char('a') => Some(Message::SelectAllLines),
             KeyCode::Char('s') => Some(Message::StageLines),
             KeyCode::Char('S') => Some(Message::StageFile),
+            KeyCode::Char('i') => Some(Message::EnterEditMode),
             KeyCode::Esc | KeyCode::Left => Some(Message::ExitLineMode),
             _ => None,
         },

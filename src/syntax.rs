@@ -52,3 +52,43 @@ pub fn file_extension(path: &str) -> Option<&str> {
         .extension()
         .and_then(|ext| ext.to_str())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_file_extension_rs() {
+        assert_eq!(file_extension("src/main.rs"), Some("rs"));
+    }
+
+    #[test]
+    fn test_file_extension_nested_path() {
+        assert_eq!(file_extension("src/git/diff.rs"), Some("rs"));
+    }
+
+    #[test]
+    fn test_file_extension_no_ext() {
+        assert_eq!(file_extension("Makefile"), None);
+    }
+
+    #[test]
+    fn test_file_extension_hidden_file() {
+        assert_eq!(file_extension(".gitignore"), None);
+    }
+
+    #[test]
+    fn test_file_extension_dotfile_with_ext() {
+        assert_eq!(file_extension(".config.toml"), Some("toml"));
+    }
+
+    #[test]
+    fn test_file_extension_multiple_dots() {
+        assert_eq!(file_extension("archive.tar.gz"), Some("gz"));
+    }
+
+    #[test]
+    fn test_file_extension_js() {
+        assert_eq!(file_extension("index.js"), Some("js"));
+    }
+}

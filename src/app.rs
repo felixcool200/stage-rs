@@ -50,7 +50,7 @@ pub struct ConflictSection {
     pub suffix: Vec<String>,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ConflictResolution {
     Unresolved,
     Ours,
@@ -1564,5 +1564,301 @@ fn parse_conflicts(content: &str) -> Option<(Vec<String>, Vec<ConflictSection>)>
         None
     } else {
         Some((prefix, sections))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── TextInput ──
+
+    #[test]
+    fn test_text_input_new_empty() {
+        let ti = TextInput::new("");
+        assert_eq!(ti.lines, vec![""]);
+        assert_eq!(ti.cursor_row, 0);
+        assert_eq!(ti.cursor_col, 0);
+    }
+
+    #[test]
+    fn test_text_input_new_single_line() {
+        let ti = TextInput::new("hello");
+        assert_eq!(ti.lines, vec!["hello"]);
+        assert_eq!(ti.cursor_row, 0);
+        assert_eq!(ti.cursor_col, 5);
+    }
+
+    #[test]
+    fn test_text_input_new_multiline() {
+        let ti = TextInput::new("first\nsecond\nthird");
+        assert_eq!(ti.lines, vec!["first", "second", "third"]);
+        assert_eq!(ti.cursor_row, 2);
+        assert_eq!(ti.cursor_col, 5);
+    }
+
+    #[test]
+    fn test_text_input_insert_char() {
+        let mut ti = TextInput::new("");
+        ti.insert_char('a');
+        ti.insert_char('b');
+        assert_eq!(ti.to_string(), "ab");
+        assert_eq!(ti.cursor_col, 2);
+    }
+
+    #[test]
+    fn test_text_input_insert_char_mid_line() {
+        let mut ti = TextInput::new("ac");
+        ti.cursor_col = 1; // between a and c
+        ti.insert_char('b');
+        assert_eq!(ti.to_string(), "abc");
+        assert_eq!(ti.cursor_col, 2);
+    }
+
+    #[test]
+    fn test_text_input_insert_newline() {
+        let mut ti = TextInput::new("hello world");
+        ti.cursor_col = 5;
+        ti.insert_newline();
+        assert_eq!(ti.lines, vec!["hello", " world"]);
+        assert_eq!(ti.cursor_row, 1);
+        assert_eq!(ti.cursor_col, 0);
+    }
+
+    #[test]
+    fn test_text_input_backspace_mid_line() {
+        let mut ti = TextInput::new("abc");
+        ti.cursor_col = 2;
+        ti.backspace();
+        assert_eq!(ti.to_string(), "ac");
+        assert_eq!(ti.cursor_col, 1);
+    }
+
+    #[test]
+    fn test_text_input_backspace_start_of_line() {
+        let mut ti = TextInput::new("first\nsecond");
+        ti.cursor_row = 1;
+        ti.cursor_col = 0;
+        ti.backspace();
+        assert_eq!(ti.lines, vec!["firstsecond"]);
+        assert_eq!(ti.cursor_row, 0);
+        assert_eq!(ti.cursor_col, 5);
+    }
+
+    #[test]
+    fn test_text_input_backspace_at_start_does_nothing() {
+        let mut ti = TextInput::new("hello");
+        ti.cursor_col = 0;
+        ti.backspace();
+        assert_eq!(ti.to_string(), "hello");
+    }
+
+    #[test]
+    fn test_text_input_move_left() {
+        let mut ti = TextInput::new("abc");
+        ti.cursor_col = 2;
+        ti.move_left();
+        assert_eq!(ti.cursor_col, 1);
+        ti.move_left();
+        assert_eq!(ti.cursor_col, 0);
+        ti.move_left(); // at start, should not go negative
+        assert_eq!(ti.cursor_col, 0);
+    }
+
+    #[test]
+    fn test_text_input_move_right() {
+        let mut ti = TextInput::new("abc");
+        ti.cursor_col = 0;
+        ti.move_right();
+        assert_eq!(ti.cursor_col, 1);
+        ti.move_right();
+        ti.move_right();
+        assert_eq!(ti.cursor_col, 3);
+        ti.move_right(); // at end, should not go past
+        assert_eq!(ti.cursor_col, 3);
+    }
+
+    #[test]
+    fn test_text_input_move_up_down() {
+        let mut ti = TextInput::new("short\nlong line here");
+        ti.cursor_row = 1;
+        ti.cursor_col = 14;
+        ti.move_up();
+        assert_eq!(ti.cursor_row, 0);
+        assert_eq!(ti.cursor_col, 5); // clamped to shorter line
+        ti.move_down();
+        assert_eq!(ti.cursor_row, 1);
+        assert_eq!(ti.cursor_col, 5); // stays clamped
+    }
+
+    #[test]
+    fn test_text_input_move_up_at_top() {
+        let mut ti = TextInput::new("only");
+        ti.cursor_row = 0;
+        ti.move_up();
+        assert_eq!(ti.cursor_row, 0);
+    }
+
+    #[test]
+    fn test_text_input_move_down_at_bottom() {
+        let mut ti = TextInput::new("only");
+        ti.move_down();
+        assert_eq!(ti.cursor_row, 0);
+    }
+
+    #[test]
+    fn test_text_input_move_home_end() {
+        let mut ti = TextInput::new("hello");
+        ti.cursor_col = 3;
+        ti.move_home();
+        assert_eq!(ti.cursor_col, 0);
+        ti.move_end();
+        assert_eq!(ti.cursor_col, 5);
+    }
+
+    #[test]
+    fn test_text_input_is_empty() {
+        assert!(TextInput::new("").is_empty());
+        assert!(TextInput::new("   ").is_empty());
+        assert!(TextInput::new("  \n  \n  ").is_empty());
+        assert!(!TextInput::new("hello").is_empty());
+        assert!(!TextInput::new("\nhello\n").is_empty());
+    }
+
+    #[test]
+    fn test_text_input_to_string() {
+        let ti = TextInput::new("line1\nline2");
+        assert_eq!(ti.to_string(), "line1\nline2");
+    }
+
+    #[test]
+    fn test_text_input_unicode() {
+        let mut ti = TextInput::new("héllo");
+        // new() uses .len() (byte length) for initial cursor_col
+        assert_eq!(ti.cursor_col, 6);
+        // insert_char works with char indexing
+        ti.cursor_col = 1;
+        ti.insert_char('x');
+        assert_eq!(ti.to_string(), "hxéllo");
+    }
+
+    // ── char_to_byte_idx ──
+
+    #[test]
+    fn test_char_to_byte_idx_ascii() {
+        assert_eq!(char_to_byte_idx("hello", 0), 0);
+        assert_eq!(char_to_byte_idx("hello", 3), 3);
+        assert_eq!(char_to_byte_idx("hello", 5), 5);
+    }
+
+    #[test]
+    fn test_char_to_byte_idx_unicode() {
+        let s = "héllo"; // é is 2 bytes in UTF-8
+        assert_eq!(char_to_byte_idx(s, 0), 0);
+        assert_eq!(char_to_byte_idx(s, 1), 1); // 'h'
+        assert_eq!(char_to_byte_idx(s, 2), 3); // after 'é' (2 bytes)
+    }
+
+    #[test]
+    fn test_char_to_byte_idx_past_end() {
+        assert_eq!(char_to_byte_idx("hi", 10), 2); // returns s.len()
+    }
+
+    // ── RebaseAction ──
+
+    #[test]
+    fn test_rebase_action_cycle() {
+        assert_eq!(RebaseAction::Pick.cycle(), RebaseAction::Squash);
+        assert_eq!(RebaseAction::Squash.cycle(), RebaseAction::Drop);
+        assert_eq!(RebaseAction::Drop.cycle(), RebaseAction::Pick);
+    }
+
+    #[test]
+    fn test_rebase_action_label() {
+        assert_eq!(RebaseAction::Pick.label(), "pick");
+        assert_eq!(RebaseAction::Squash.label(), "squash");
+        assert_eq!(RebaseAction::Drop.label(), "drop");
+    }
+
+    #[test]
+    fn test_rebase_action_full_cycle() {
+        let action = RebaseAction::Pick;
+        let cycled = action.cycle().cycle().cycle();
+        assert_eq!(cycled, RebaseAction::Pick);
+    }
+
+    // ── parse_conflicts ──
+
+    #[test]
+    fn test_parse_conflicts_no_conflicts() {
+        assert!(parse_conflicts("normal file content\nno conflicts here\n").is_none());
+    }
+
+    #[test]
+    fn test_parse_conflicts_single_conflict() {
+        let content = "before\n<<<<<<< HEAD\nours line\n=======\ntheirs line\n>>>>>>> branch\nafter\n";
+        let (prefix, sections) = parse_conflicts(content).unwrap();
+        assert_eq!(prefix, vec!["before"]);
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].ours, vec!["ours line"]);
+        assert_eq!(sections[0].theirs, vec!["theirs line"]);
+        assert_eq!(sections[0].resolution, ConflictResolution::Unresolved);
+        assert_eq!(sections[0].suffix, vec!["after"]);
+    }
+
+    #[test]
+    fn test_parse_conflicts_multiple_conflicts() {
+        let content = "\
+prefix line
+<<<<<<< HEAD
+ours1
+=======
+theirs1
+>>>>>>> branch
+middle
+<<<<<<< HEAD
+ours2
+=======
+theirs2
+>>>>>>> branch
+end";
+        let (prefix, sections) = parse_conflicts(content).unwrap();
+        assert_eq!(prefix, vec!["prefix line"]);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].ours, vec!["ours1"]);
+        assert_eq!(sections[0].theirs, vec!["theirs1"]);
+        assert_eq!(sections[0].suffix, vec!["middle"]);
+        assert_eq!(sections[1].ours, vec!["ours2"]);
+        assert_eq!(sections[1].theirs, vec!["theirs2"]);
+        assert_eq!(sections[1].suffix, vec!["end"]);
+    }
+
+    #[test]
+    fn test_parse_conflicts_multi_line_sides() {
+        let content = "<<<<<<< HEAD\nour line 1\nour line 2\n=======\ntheir line 1\ntheir line 2\ntheir line 3\n>>>>>>> branch\n";
+        let (prefix, sections) = parse_conflicts(content).unwrap();
+        assert!(prefix.is_empty());
+        assert_eq!(sections[0].ours, vec!["our line 1", "our line 2"]);
+        assert_eq!(sections[0].theirs, vec!["their line 1", "their line 2", "their line 3"]);
+    }
+
+    #[test]
+    fn test_parse_conflicts_empty_sides() {
+        let content = "<<<<<<< HEAD\n=======\ntheirs\n>>>>>>> branch\n";
+        let (_, sections) = parse_conflicts(content).unwrap();
+        assert!(sections[0].ours.is_empty());
+        assert_eq!(sections[0].theirs, vec!["theirs"]);
+    }
+
+    // ── Overlay ──
+
+    #[test]
+    fn test_overlay_is_active() {
+        assert!(!Overlay::None.is_active());
+        assert!(Overlay::Confirm {
+            message: "test".into(),
+            action: PendingAction::UndoLastCommit,
+        }
+        .is_active());
     }
 }

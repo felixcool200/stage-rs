@@ -333,4 +333,114 @@ mod tests {
         let result = apply_lines(old, new, &selected);
         assert_eq!(result, "a\nb\n");
     }
+
+    #[test]
+    fn test_compute_diff_empty_strings() {
+        let (left, right, hunks) = compute_diff("", "");
+        assert!(left.is_empty());
+        assert!(right.is_empty());
+        assert!(hunks.is_empty());
+    }
+
+    #[test]
+    fn test_compute_diff_identical_input() {
+        let text = "line1\nline2\nline3\n";
+        let (left, right, hunks) = compute_diff(text, text);
+        assert!(hunks.is_empty());
+        assert!(left.iter().all(|l| l.kind == DiffLineKind::Equal));
+        assert!(right.iter().all(|l| l.kind == DiffLineKind::Equal));
+    }
+
+    #[test]
+    fn test_compute_diff_all_added() {
+        let (left, right, hunks) = compute_diff("", "a\nb\n");
+        assert_eq!(hunks.len(), 1);
+        assert!(left.iter().all(|l| l.kind == DiffLineKind::Spacer));
+        assert!(right.iter().all(|l| l.kind == DiffLineKind::Added));
+    }
+
+    #[test]
+    fn test_compute_diff_all_removed() {
+        let (left, right, hunks) = compute_diff("a\nb\n", "");
+        assert_eq!(hunks.len(), 1);
+        assert!(left.iter().all(|l| l.kind == DiffLineKind::Removed));
+        assert!(right.iter().all(|l| l.kind == DiffLineKind::Spacer));
+    }
+
+    #[test]
+    fn test_compute_diff_left_right_same_length() {
+        let old = "a\nb\nc\n";
+        let new = "a\nX\nc\n";
+        let (left, right, _) = compute_diff(old, new);
+        assert_eq!(left.len(), right.len());
+    }
+
+    #[test]
+    fn test_compute_diff_hunk_indices_consistent() {
+        let old = "a\nb\nc\nd\ne\n";
+        let new = "a\nB\nc\nd\nE\n";
+        let (left, right, hunks) = compute_diff(old, new);
+
+        // All changed lines should have hunk_index set
+        for line in &left {
+            if line.kind != DiffLineKind::Equal {
+                assert!(line.hunk_index.is_some());
+            }
+        }
+        for line in &right {
+            if line.kind != DiffLineKind::Equal {
+                assert!(line.hunk_index.is_some());
+            }
+        }
+
+        // Hunk ranges should be valid
+        for hunk in &hunks {
+            assert!(hunk.display_start < hunk.display_end);
+            assert!(hunk.display_end <= left.len());
+        }
+    }
+
+    #[test]
+    fn test_changed_rows_in_hunk() {
+        let old = "a\nb\nc\nd\ne\n";
+        let new = "a\nB\nc\nd\nE\n";
+        let (left, _, hunks) = compute_diff(old, new);
+
+        assert_eq!(hunks.len(), 2);
+        let rows0 = changed_rows_in_hunk(&hunks[0], &left);
+        let rows1 = changed_rows_in_hunk(&hunks[1], &left);
+
+        // Each hunk should have changed rows within its range
+        for &r in &rows0 {
+            assert!(r >= hunks[0].display_start && r < hunks[0].display_end);
+        }
+        for &r in &rows1 {
+            assert!(r >= hunks[1].display_start && r < hunks[1].display_end);
+        }
+
+        // Both hunks should have non-empty changed rows
+        assert!(!rows0.is_empty());
+        assert!(!rows1.is_empty());
+    }
+
+    #[test]
+    fn test_apply_hunk_no_change_when_wrong_index() {
+        let old = "a\nb\nc\n";
+        let new = "a\nB\nc\n";
+
+        // Selecting a hunk index that doesn't exist should keep old content
+        let result = apply_hunk(old, new, 99);
+        assert_eq!(result, old);
+    }
+
+    #[test]
+    fn test_apply_lines_empty_selection() {
+        let old = "a\nold\nb\n";
+        let new = "a\nnew\nb\n";
+
+        // No rows selected = keep old content
+        let selected = BTreeSet::new();
+        let result = apply_lines(old, new, &selected);
+        assert_eq!(result, old);
+    }
 }

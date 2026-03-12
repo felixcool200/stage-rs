@@ -57,6 +57,11 @@ pub fn resolve(keymap: KeymapName, ctx: InputContext, key: KeyEvent) -> Option<M
         KeyCode::Char('k') | KeyCode::Up => return Some(Message::MoveUp),
         KeyCode::Tab => return Some(Message::SwitchPanel),
         KeyCode::Char('r') => return Some(Message::Refresh),
+        // Commit / log (shared across keymaps and contexts)
+        KeyCode::Char('c') => return Some(Message::OpenCommit),
+        KeyCode::Char('C') => return Some(Message::OpenCommitAmend),
+        KeyCode::Char('z') => return Some(Message::UndoLastCommit),
+        KeyCode::Char('g') => return Some(Message::OpenGitLog),
         _ => {}
     }
 

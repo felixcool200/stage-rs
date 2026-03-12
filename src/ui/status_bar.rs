@@ -18,19 +18,19 @@ pub fn render_header(app: &App, frame: &mut Frame, area: Rect) {
 
     let keybinds = match (app.active_panel, in_line_mode, app.keymap) {
         (Panel::FileList, _, _) => {
-            "  [s]tage file [u]nstage [d]iscard [r]efresh [q]uit "
+            "  [s]tage [u]nstage [d]iscard [c]ommit [C]amend [z]undo [g]log [q]uit "
         }
         (Panel::DiffView, false, _) => {
             match app.keymap {
-                KeymapName::Vim => "  [s]tage hunk [S]tage file Enter:lines [u]nstage [q]uit ",
-                KeymapName::Helix => "  [s]tage hunk [S]tage file [v]:lines [u]nstage [q]uit ",
+                KeymapName::Vim => "  [s]tage hunk [S]file Enter:lines [c]ommit [g]log [q]uit ",
+                KeymapName::Helix => "  [s]tage hunk [S]file [v]:lines [c]ommit [g]log [q]uit ",
             }
         }
         (Panel::DiffView, true, KeymapName::Vim) => {
-            "  Space:toggle [a]ll [s]tage [S]tage file Esc:back [q]uit "
+            "  Space:toggle [a]ll [s]tage [S]file Esc:back [q]uit "
         }
         (Panel::DiffView, true, KeymapName::Helix) => {
-            "  [x]:toggle [X]:all [s]tage [S]tage file Esc:back [q]uit "
+            "  [x]:toggle [X]:all [s]tage [S]file Esc:back [q]uit "
         }
     };
 

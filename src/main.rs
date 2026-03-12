@@ -4,9 +4,10 @@ mod git;
 mod keymap;
 mod ui;
 
-use app::App;
+use app::{App, Overlay};
 use color_eyre::Result;
 use keymap::KeymapName;
+use std::time::Duration;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -61,7 +62,11 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|frame| ui::render(app, frame))?;
 
-        if let Some(msg) = event::poll_event(app)? {
+        if matches!(app.overlay, Overlay::CommitInput { .. }) {
+            if let Some(msg) = poll_with_text_input(app)? {
+                app.update(msg)?;
+            }
+        } else if let Some(msg) = event::poll_event(app)? {
             app.update(msg)?;
         }
 
@@ -70,4 +75,30 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn poll_with_text_input(app: &mut App) -> Result<Option<app::Message>> {
+    if !crossterm::event::poll(Duration::from_millis(250))? {
+        return Ok(None);
+    }
+
+    let crossterm::event::Event::Key(key) = crossterm::event::read()? else {
+        return Ok(None);
+    };
+
+    if key.kind != crossterm::event::KeyEventKind::Press {
+        return Ok(None);
+    }
+
+    // First try the overlay handler for control keys
+    if let Some(msg) = event::poll_event_overlay_only(key) {
+        return Ok(Some(msg));
+    }
+
+    // Otherwise, apply as text input
+    if let Overlay::CommitInput { ref mut input, .. } = app.overlay {
+        event::apply_text_input_key(input, key.modifiers, key.code);
+    }
+
+    Ok(None)
 }

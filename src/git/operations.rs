@@ -1,5 +1,5 @@
-use color_eyre::Result;
-use git2::{build::CheckoutBuilder, Repository};
+use color_eyre::{eyre::eyre, Result};
+use git2::{build::CheckoutBuilder, Repository, Signature};
 use std::path::Path;
 
 pub fn stage_file(repo: &Repository, path: &str) -> Result<()> {
@@ -15,13 +15,10 @@ pub fn stage_file(repo: &Repository, path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Stage specific content for a file (for partial/hunk staging).
-/// Writes the given content as a blob and updates the index entry.
 pub fn stage_content(repo: &Repository, path: &str, content: &str) -> Result<()> {
     let blob_oid = repo.blob(content.as_bytes())?;
     let mut index = repo.index()?;
 
-    // Get the file mode from the existing index entry or default to regular file
     let mode = index
         .get_path(Path::new(path), 0)
         .map(|e| e.mode)
@@ -52,7 +49,6 @@ pub fn unstage_file(repo: &Repository, path: &str) -> Result<()> {
     if let Ok(head) = repo.head() {
         let tree = head.peel_to_tree()?;
         if let Ok(entry) = tree.get_path(Path::new(path)) {
-            // File exists in HEAD — reset the index entry to match HEAD
             let blob = repo.find_blob(entry.id())?;
             let index_entry = git2::IndexEntry {
                 ctime: git2::IndexTime::new(0, 0),
@@ -70,11 +66,9 @@ pub fn unstage_file(repo: &Repository, path: &str) -> Result<()> {
             };
             index.add(&index_entry)?;
         } else {
-            // File doesn't exist in HEAD — it was newly staged, remove from index
             index.remove_path(Path::new(path))?;
         }
     } else {
-        // No HEAD (empty repo) — remove from index
         index.remove_path(Path::new(path))?;
     }
 
@@ -83,10 +77,92 @@ pub fn unstage_file(repo: &Repository, path: &str) -> Result<()> {
 }
 
 pub fn discard_changes(repo: &Repository, path: &str) -> Result<()> {
-    repo.checkout_head(Some(
-        CheckoutBuilder::new()
-            .path(path)
-            .force(),
-    ))?;
+    repo.checkout_head(Some(CheckoutBuilder::new().path(path).force()))?;
     Ok(())
+}
+
+pub fn commit(repo: &Repository, message: &str) -> Result<String> {
+    let sig = repo
+        .signature()
+        .or_else(|_| Signature::now("gitview-rs", "gitview@localhost"))
+        .map_err(|e| eyre!("Cannot create signature: {e}"))?;
+
+    let mut index = repo.index()?;
+    let tree_oid = index.write_tree()?;
+    let tree = repo.find_tree(tree_oid)?;
+
+    let parent = match repo.head() {
+        Ok(head) => Some(head.peel_to_commit()?),
+        Err(_) => None, // Initial commit
+    };
+
+    let parents: Vec<&git2::Commit> = parent.iter().collect();
+    let oid = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)?;
+
+    Ok(oid.to_string()[..7].to_string())
+}
+
+pub fn commit_amend(repo: &Repository, message: &str) -> Result<String> {
+    let sig = repo
+        .signature()
+        .or_else(|_| Signature::now("gitview-rs", "gitview@localhost"))
+        .map_err(|e| eyre!("Cannot create signature: {e}"))?;
+
+    let head = repo.head().map_err(|_| eyre!("No HEAD to amend"))?;
+    let head_commit = head.peel_to_commit()?;
+
+    let mut index = repo.index()?;
+    let tree_oid = index.write_tree()?;
+    let tree = repo.find_tree(tree_oid)?;
+
+    let oid = head_commit.amend(Some("HEAD"), Some(&sig), Some(&sig), None, Some(message), Some(&tree))?;
+
+    Ok(oid.to_string()[..7].to_string())
+}
+
+/// Soft-reset HEAD to HEAD~1, returning the commit message of the undone commit.
+pub fn undo_last_commit(repo: &Repository) -> Result<String> {
+    let head = repo.head().map_err(|_| eyre!("No HEAD to undo"))?;
+    let head_commit = head.peel_to_commit()?;
+    let message = head_commit
+        .message()
+        .unwrap_or("")
+        .to_string();
+
+    let parent = head_commit
+        .parent(0)
+        .map_err(|_| eyre!("Cannot undo initial commit"))?;
+
+    // Soft reset: move HEAD to parent, keep index and working tree
+    repo.reset(
+        parent.as_object(),
+        git2::ResetType::Soft,
+        None,
+    )?;
+
+    Ok(message)
+}
+
+pub fn last_commit_message(repo: &Repository) -> Option<String> {
+    repo.head()
+        .ok()?
+        .peel_to_commit()
+        .ok()?
+        .message()
+        .map(|s| s.to_string())
+}
+
+pub fn has_staged_changes(repo: &Repository) -> bool {
+    let Ok(statuses) = repo.statuses(None) else {
+        return false;
+    };
+    statuses.iter().any(|e| {
+        let s = e.status();
+        s.intersects(
+            git2::Status::INDEX_NEW
+                | git2::Status::INDEX_MODIFIED
+                | git2::Status::INDEX_DELETED
+                | git2::Status::INDEX_RENAMED,
+        )
+    })
 }

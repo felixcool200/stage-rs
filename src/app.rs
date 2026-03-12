@@ -1,4 +1,4 @@
-use crate::git::{self, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair};
+use crate::git::{self, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair, LogEntry};
 use crate::keymap::KeymapName;
 use color_eyre::Result;
 use std::collections::BTreeSet;
@@ -15,6 +15,9 @@ pub struct App {
     pub status_message: Option<String>,
     pub last_refresh: Instant,
     pub keymap: KeymapName,
+    pub overlay: Overlay,
+    /// Saved commit message from undo, pre-filled on next commit
+    pub saved_commit_msg: Option<String>,
 }
 
 pub struct DiffState {
@@ -28,11 +31,10 @@ pub struct DiffState {
     pub max_scroll: usize,
     pub old_content: String,
     pub new_content: String,
-    // Line mode state
     pub view_mode: DiffViewMode,
-    pub cursor_line: usize,              // display row of cursor in line mode
-    pub selected_lines: BTreeSet<usize>, // toggled display rows for staging
-    pub hunk_changed_rows: Vec<usize>,   // cached changed rows in current hunk
+    pub cursor_line: usize,
+    pub selected_lines: BTreeSet<usize>,
+    pub hunk_changed_rows: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,9 +45,141 @@ pub enum Panel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffViewMode {
-    HunkNav, // j/k navigates hunks
-    LineNav,  // j/k navigates individual changed lines
+    HunkNav,
+    LineNav,
 }
+
+// ── Overlay (popups) ─────────────────────────────────────────────────────────
+
+pub enum Overlay {
+    None,
+    CommitInput {
+        input: TextInput,
+        amend: bool,
+    },
+    GitLog {
+        entries: Vec<LogEntry>,
+        selected: usize,
+        scroll: usize,
+    },
+}
+
+impl Overlay {
+    pub fn is_active(&self) -> bool {
+        !matches!(self, Overlay::None)
+    }
+}
+
+// ── TextInput ────────────────────────────────────────────────────────────────
+
+pub struct TextInput {
+    pub lines: Vec<String>,
+    pub cursor_row: usize,
+    pub cursor_col: usize,
+}
+
+impl TextInput {
+    pub fn new(initial: &str) -> Self {
+        let lines: Vec<String> = if initial.is_empty() {
+            vec![String::new()]
+        } else {
+            initial.lines().map(String::from).collect()
+        };
+        let cursor_row = lines.len().saturating_sub(1);
+        let cursor_col = lines.last().map(|l| l.len()).unwrap_or(0);
+        Self {
+            lines,
+            cursor_row,
+            cursor_col,
+        }
+    }
+
+    pub fn insert_char(&mut self, ch: char) {
+        let line = &mut self.lines[self.cursor_row];
+        let byte_idx = char_to_byte_idx(line, self.cursor_col);
+        line.insert(byte_idx, ch);
+        self.cursor_col += 1;
+    }
+
+    pub fn insert_newline(&mut self) {
+        let line = &mut self.lines[self.cursor_row];
+        let byte_idx = char_to_byte_idx(line, self.cursor_col);
+        let rest = line[byte_idx..].to_string();
+        line.truncate(byte_idx);
+        self.cursor_row += 1;
+        self.cursor_col = 0;
+        self.lines.insert(self.cursor_row, rest);
+    }
+
+    pub fn backspace(&mut self) {
+        if self.cursor_col > 0 {
+            let line = &mut self.lines[self.cursor_row];
+            let byte_idx = char_to_byte_idx(line, self.cursor_col - 1);
+            let end_idx = char_to_byte_idx(line, self.cursor_col);
+            line.replace_range(byte_idx..end_idx, "");
+            self.cursor_col -= 1;
+        } else if self.cursor_row > 0 {
+            let removed = self.lines.remove(self.cursor_row);
+            self.cursor_row -= 1;
+            self.cursor_col = self.lines[self.cursor_row].chars().count();
+            self.lines[self.cursor_row].push_str(&removed);
+        }
+    }
+
+    pub fn move_left(&mut self) {
+        if self.cursor_col > 0 {
+            self.cursor_col -= 1;
+        }
+    }
+
+    pub fn move_right(&mut self) {
+        let len = self.lines[self.cursor_row].chars().count();
+        if self.cursor_col < len {
+            self.cursor_col += 1;
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.cursor_row > 0 {
+            self.cursor_row -= 1;
+            let len = self.lines[self.cursor_row].chars().count();
+            self.cursor_col = self.cursor_col.min(len);
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if self.cursor_row < self.lines.len() - 1 {
+            self.cursor_row += 1;
+            let len = self.lines[self.cursor_row].chars().count();
+            self.cursor_col = self.cursor_col.min(len);
+        }
+    }
+
+    pub fn move_home(&mut self) {
+        self.cursor_col = 0;
+    }
+
+    pub fn move_end(&mut self) {
+        self.cursor_col = self.lines[self.cursor_row].chars().count();
+    }
+
+    pub fn to_string(&self) -> String {
+        self.lines.join("\n")
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.lines.iter().all(|l| l.trim().is_empty())
+    }
+}
+
+fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len())
+}
+
+// ── Messages ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug)]
 pub enum Message {
@@ -65,8 +199,18 @@ pub enum Message {
     StageLines,
     SelectAllLines,
     CycleKeymap,
+    // Commit / log
+    OpenCommit,
+    OpenCommitAmend,
+    UndoLastCommit,
+    OpenGitLog,
+    // Overlay actions (handled by overlay key routing, not keymap)
+    CloseOverlay,
+    ConfirmCommit,
     Quit,
 }
+
+// ── App ──────────────────────────────────────────────────────────────────────
 
 impl App {
     pub fn new(path: &str, keymap: KeymapName) -> Result<Self> {
@@ -85,13 +229,22 @@ impl App {
             status_message: None,
             last_refresh: Instant::now(),
             keymap,
+            overlay: Overlay::None,
+            saved_commit_msg: None,
         })
     }
 
     pub fn update(&mut self, msg: Message) -> Result<()> {
         match msg {
             Message::Quit => {
-                self.should_quit = true;
+                if self.overlay.is_active() {
+                    self.overlay = Overlay::None;
+                } else {
+                    self.should_quit = true;
+                }
+            }
+            Message::CloseOverlay => {
+                self.overlay = Overlay::None;
             }
             Message::MoveUp => self.handle_move_up(),
             Message::MoveDown => self.handle_move_down(),
@@ -99,7 +252,6 @@ impl App {
                 self.load_selected_diff()?;
             }
             Message::SwitchPanel => {
-                // Exiting diff view also exits line mode
                 if self.active_panel == Panel::DiffView {
                     if let Some(ds) = &mut self.diff_state {
                         ds.view_mode = DiffViewMode::HunkNav;
@@ -205,10 +357,8 @@ impl App {
                 if let Some(ds) = &mut self.diff_state {
                     if ds.view_mode == DiffViewMode::LineNav {
                         if ds.selected_lines.len() == ds.hunk_changed_rows.len() {
-                            // All selected — deselect all
                             ds.selected_lines.clear();
                         } else {
-                            // Select all
                             ds.selected_lines = ds.hunk_changed_rows.iter().copied().collect();
                         }
                     }
@@ -219,14 +369,120 @@ impl App {
             }
             Message::CycleKeymap => {
                 self.keymap = self.keymap.cycle();
-                self.status_message =
-                    Some(format!("Keymap: {}", self.keymap.label()));
+                self.status_message = Some(format!("Keymap: {}", self.keymap.label()));
+            }
+
+            // ── Commit / Log ─────────────────────────────────────────────
+            Message::OpenCommit => {
+                if !self.repo.has_staged_changes() {
+                    self.status_message = Some("Nothing staged to commit".into());
+                    return Ok(());
+                }
+                let initial = self.saved_commit_msg.take().unwrap_or_default();
+                self.overlay = Overlay::CommitInput {
+                    input: TextInput::new(&initial),
+                    amend: false,
+                };
+            }
+            Message::OpenCommitAmend => {
+                let initial = self.repo.last_commit_message().unwrap_or_default();
+                self.overlay = Overlay::CommitInput {
+                    input: TextInput::new(&initial),
+                    amend: true,
+                };
+            }
+            Message::ConfirmCommit => {
+                self.do_commit()?;
+            }
+            Message::UndoLastCommit => {
+                match self.repo.undo_last_commit() {
+                    Ok(msg) => {
+                        self.status_message = Some("Undone last commit (message saved)".into());
+                        self.saved_commit_msg = Some(msg);
+                        self.refresh()?;
+                        if self.diff_state.is_some() {
+                            self.load_selected_diff()?;
+                        }
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Undo failed: {e}"));
+                    }
+                }
+            }
+            Message::OpenGitLog => {
+                match self.repo.get_log(100) {
+                    Ok(entries) => {
+                        self.overlay = Overlay::GitLog {
+                            entries,
+                            selected: 0,
+                            scroll: 0,
+                        };
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Log failed: {e}"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn do_commit(&mut self) -> Result<()> {
+        let (message, amend) = match &self.overlay {
+            Overlay::CommitInput { input, amend } => {
+                if input.is_empty() {
+                    self.status_message = Some("Commit message cannot be empty".into());
+                    return Ok(());
+                }
+                (input.to_string(), *amend)
+            }
+            _ => return Ok(()),
+        };
+
+        let result = if amend {
+            self.repo.commit_amend(&message)
+        } else {
+            self.repo.commit(&message)
+        };
+
+        match result {
+            Ok(hash) => {
+                let verb = if amend { "Amended" } else { "Committed" };
+                self.status_message = Some(format!("{verb}: {hash}"));
+                self.overlay = Overlay::None;
+                self.saved_commit_msg = None;
+                self.refresh()?;
+                if self.diff_state.is_some() {
+                    self.load_selected_diff()?;
+                }
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Commit failed: {e}"));
             }
         }
         Ok(())
     }
 
     fn handle_move_up(&mut self) {
+        match &mut self.overlay {
+            Overlay::GitLog {
+                selected, scroll, ..
+            } => {
+                if *selected > 0 {
+                    *selected -= 1;
+                    if *selected < *scroll {
+                        *scroll = *selected;
+                    }
+                }
+                return;
+            }
+            Overlay::CommitInput { input, .. } => {
+                input.move_up();
+                return;
+            }
+            Overlay::None => {}
+        }
+
         if self.active_panel == Panel::FileList {
             if self.selected_index > 0 {
                 self.selected_index -= 1;
@@ -244,11 +500,9 @@ impl App {
                 }
             }
             DiffViewMode::LineNav => {
-                // Find prev changed row in the hunk
                 if let Some(pos) = ds.hunk_changed_rows.iter().position(|&r| r == ds.cursor_line) {
                     if pos > 0 {
                         ds.cursor_line = ds.hunk_changed_rows[pos - 1];
-                        // Keep cursor visible
                         if ds.cursor_line < ds.scroll {
                             ds.scroll = ds.cursor_line;
                         }
@@ -259,6 +513,27 @@ impl App {
     }
 
     fn handle_move_down(&mut self) {
+        match &mut self.overlay {
+            Overlay::GitLog {
+                entries,
+                selected,
+                scroll,
+            } => {
+                if *selected < entries.len().saturating_sub(1) {
+                    *selected += 1;
+                    if *selected >= *scroll + 20 {
+                        *scroll = selected.saturating_sub(19);
+                    }
+                }
+                return;
+            }
+            Overlay::CommitInput { input, .. } => {
+                input.move_down();
+                return;
+            }
+            Overlay::None => {}
+        }
+
         if self.active_panel == Panel::FileList {
             if !self.file_entries.is_empty()
                 && self.selected_index < self.file_entries.len() - 1
@@ -283,7 +558,6 @@ impl App {
                 if let Some(pos) = ds.hunk_changed_rows.iter().position(|&r| r == ds.cursor_line) {
                     if pos < ds.hunk_changed_rows.len() - 1 {
                         ds.cursor_line = ds.hunk_changed_rows[pos + 1];
-                        // Keep cursor visible (assume ~20 lines visible as conservative estimate)
                         if ds.cursor_line >= ds.scroll + 20 {
                             ds.scroll = ds.cursor_line.saturating_sub(10);
                         }
@@ -334,7 +608,6 @@ impl App {
                 return Ok(());
             }
             let lines = if ds.selected_lines.is_empty() {
-                // No explicit selection — stage just the cursor line
                 let mut s = BTreeSet::new();
                 s.insert(ds.cursor_line);
                 s

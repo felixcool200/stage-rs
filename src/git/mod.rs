@@ -1,4 +1,5 @@
 mod diff;
+mod log;
 mod operations;
 mod status;
 
@@ -7,6 +8,7 @@ use git2::Repository;
 use std::path::Path;
 
 pub use diff::{apply_hunk, apply_lines, changed_rows_in_hunk, compute_diff, DiffLine, DiffLineKind, Hunk, LinePair};
+pub use log::LogEntry;
 pub use status::{ChangeKind, FileEntry, FileStatus};
 
 pub struct GitRepo {
@@ -49,6 +51,30 @@ impl GitRepo {
 
     pub fn stage_content(&self, path: &str, content: &str) -> Result<()> {
         operations::stage_content(&self.repo, path, content)
+    }
+
+    pub fn commit(&self, message: &str) -> Result<String> {
+        operations::commit(&self.repo, message)
+    }
+
+    pub fn commit_amend(&self, message: &str) -> Result<String> {
+        operations::commit_amend(&self.repo, message)
+    }
+
+    pub fn undo_last_commit(&self) -> Result<String> {
+        operations::undo_last_commit(&self.repo)
+    }
+
+    pub fn last_commit_message(&self) -> Option<String> {
+        operations::last_commit_message(&self.repo)
+    }
+
+    pub fn has_staged_changes(&self) -> bool {
+        operations::has_staged_changes(&self.repo)
+    }
+
+    pub fn get_log(&self, max_count: usize) -> Result<Vec<LogEntry>> {
+        log::get_log(&self.repo, max_count)
     }
 
     pub fn workdir(&self) -> &Path {

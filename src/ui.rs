@@ -1,5 +1,6 @@
 mod diff_view;
 mod file_panel;
+mod popup;
 mod status_bar;
 
 use crate::app::App;
@@ -31,4 +32,7 @@ pub fn render(app: &App, frame: &mut Frame) {
     diff_view::render_left(app, frame, diff_left);
     diff_view::render_right(app, frame, diff_right);
     status_bar::render_footer(app, frame, footer);
+
+    // Render overlay on top
+    popup::render(app, frame);
 }

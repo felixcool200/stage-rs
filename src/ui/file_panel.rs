@@ -90,31 +90,44 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             String::new()
         };
 
-        let mut spans = vec![
+        let first_line = Line::from(vec![
             Span::raw("  "),
             Span::styled(format!("{label} "), Style::default().fg(status_color)),
             Span::styled(filename, Style::default().fg(Color::White)),
-            Span::styled(dir, Style::default().fg(Color::DarkGray)),
-        ];
+        ]);
+
+        let mut second_spans: Vec<Span> = Vec::new();
+        if !dir.is_empty() {
+            second_spans.push(Span::styled(format!("    {}", dir.trim()), Style::default().fg(Color::DarkGray)));
+        }
         if entry.insertions > 0 || entry.deletions > 0 {
-            spans.push(Span::styled(" ", Style::default()));
+            if !second_spans.is_empty() {
+                second_spans.push(Span::styled(" ", Style::default()));
+            } else {
+                second_spans.push(Span::styled("     ", Style::default()));
+            }
             if entry.insertions > 0 {
-                spans.push(Span::styled(
+                second_spans.push(Span::styled(
                     format!("+{}", entry.insertions),
                     Style::default().fg(Color::Green),
                 ));
             }
             if entry.deletions > 0 {
                 if entry.insertions > 0 {
-                    spans.push(Span::styled(" ", Style::default()));
+                    second_spans.push(Span::styled(" ", Style::default()));
                 }
-                spans.push(Span::styled(
+                second_spans.push(Span::styled(
                     format!("-{}", entry.deletions),
                     Style::default().fg(Color::Red),
                 ));
             }
         }
-        items.push(ListItem::new(Line::from(spans)));
+
+        if second_spans.is_empty() {
+            items.push(ListItem::new(first_line));
+        } else {
+            items.push(ListItem::new(vec![first_line, Line::from(second_spans)]));
+        }
         list_index_to_entry.push(Some(i));
     }
 

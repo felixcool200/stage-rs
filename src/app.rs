@@ -1124,14 +1124,14 @@ impl App {
                         .join("\n");
 
                     // Write to a temp script that will be used as GIT_SEQUENCE_EDITOR
-                    let todo_path = workdir.join(".git/gitview-rebase-todo");
+                    let todo_path = workdir.join(".git/stage-rebase-todo");
                     let _ = std::fs::write(&todo_path, &todo);
 
                     let script = format!(
                         "#!/bin/sh\ncp {} \"$1\"",
                         todo_path.display()
                     );
-                    let script_path = workdir.join(".git/gitview-rebase-editor.sh");
+                    let script_path = workdir.join(".git/stage-rebase-editor.sh");
                     let _ = std::fs::write(&script_path, &script);
                     #[cfg(unix)]
                     {

@@ -84,7 +84,7 @@ pub fn discard_changes(repo: &Repository, path: &str) -> Result<()> {
 pub fn commit(repo: &Repository, message: &str) -> Result<String> {
     let sig = repo
         .signature()
-        .or_else(|_| Signature::now("gitview-rs", "gitview@localhost"))
+        .or_else(|_| Signature::now("stage-rs", "stage-rs@localhost"))
         .map_err(|e| eyre!("Cannot create signature: {e}"))?;
 
     let mut index = repo.index()?;
@@ -105,7 +105,7 @@ pub fn commit(repo: &Repository, message: &str) -> Result<String> {
 pub fn commit_amend(repo: &Repository, message: &str) -> Result<String> {
     let sig = repo
         .signature()
-        .or_else(|_| Signature::now("gitview-rs", "gitview@localhost"))
+        .or_else(|_| Signature::now("stage-rs", "stage-rs@localhost"))
         .map_err(|e| eyre!("Cannot create signature: {e}"))?;
 
     let head = repo.head().map_err(|_| eyre!("No HEAD to amend"))?;
@@ -163,9 +163,9 @@ pub struct StashEntry {
 pub fn stash_save(repo: &mut Repository, message: Option<&str>) -> Result<()> {
     let sig = repo
         .signature()
-        .or_else(|_| Signature::now("gitview-rs", "gitview@localhost"))
+        .or_else(|_| Signature::now("stage-rs", "stage-rs@localhost"))
         .map_err(|e| eyre!("Cannot create signature: {e}"))?;
-    let msg = message.unwrap_or("gitview-rs stash");
+    let msg = message.unwrap_or("stage-rs stash");
     repo.stash_save(&sig, msg, Some(git2::StashFlags::DEFAULT))?;
     Ok(())
 }

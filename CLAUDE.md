@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cargo build                        # Debug build
 cargo run                          # Build and run
-cargo run -- /path/to/repo -k vim  # Run against specific repo with keymap
+cargo run -- /path/to/repo         # Run against specific repo
 cargo test                         # Run all tests (7 tests in src/git/diff.rs)
 cargo test test_apply_hunk         # Run tests matching name pattern
 cargo clippy                       # Lint

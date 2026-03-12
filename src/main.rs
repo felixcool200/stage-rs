@@ -19,9 +19,9 @@ fn main() -> Result<()> {
     while i < args.len() {
         match args[i].as_str() {
             "--help" | "-h" => {
-                println!("gitview-rs - TUI git client with side-by-side diff view");
+                println!("stage-rs - TUI git client with side-by-side diff view");
                 println!();
-                println!("USAGE: gitview-rs [PATH]");
+                println!("USAGE: stage-rs [PATH]");
                 println!();
                 println!("ARGS:");
                 println!("  [PATH]  Path to git repository (default: current directory)");

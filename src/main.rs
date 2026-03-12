@@ -37,8 +37,26 @@ fn main() -> Result<()> {
         i += 1;
     }
 
+    // Validate path before initializing the terminal
+    let canon = std::path::Path::new(&path);
+    if !canon.exists() {
+        eprintln!("error: path does not exist: {path}");
+        std::process::exit(1);
+    }
+    if !canon.is_dir() {
+        eprintln!("error: not a directory: {path}");
+        std::process::exit(1);
+    }
+
+    let mut app = match App::new(&path) {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("error: not a git repository (or any parent): {path}\n{e}");
+            std::process::exit(1);
+        }
+    };
+
     let mut terminal = ratatui::init();
-    let mut app = App::new(&path)?;
     let result = run(&mut terminal, &mut app);
     ratatui::restore();
     result

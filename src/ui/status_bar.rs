@@ -82,8 +82,9 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             DiffViewMode::LineNav => {
                 let sel = ds.selected_lines.len();
                 let total = ds.hunk_changed_rows.len();
+                let verb = if ds.is_staged { "to unstage" } else { "selected" };
                 spans.push(Span::styled(
-                    format!("{sel}/{total} lines selected "),
+                    format!("{sel}/{total} lines {verb} "),
                     Style::default().fg(Color::Magenta),
                 ));
             }

@@ -85,6 +85,8 @@ pub struct DiffState {
     pub saved_line_selection: Option<(usize, BTreeSet<usize>, usize)>,
     /// Last known viewport height (updated during render)
     pub viewport_height: usize,
+    /// Whether this diff is for a staged file (HEAD vs index)
+    pub is_staged: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -451,8 +453,13 @@ impl App {
                 entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
             }
             (Panel::DiffView, true) => {
+                let is_staged = self.diff_state.as_ref().map(|ds| ds.is_staged).unwrap_or(false);
                 entries.push(WhichKeyEntry { key: 'a', label: "toggle all", message: SelectAllLines });
-                entries.push(WhichKeyEntry { key: 's', label: "stage selected", message: StageLines });
+                entries.push(WhichKeyEntry {
+                    key: 's',
+                    label: if is_staged { "unstage selected" } else { "stage selected" },
+                    message: StageLines,
+                });
                 entries.push(WhichKeyEntry { key: 'i', label: "edit", message: EnterEditMode });
                 entries.push(WhichKeyEntry { key: 'y', label: "yank", message: YankToClipboard });
                 entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
@@ -1423,7 +1430,7 @@ impl App {
     }
 
     fn stage_selected_lines(&mut self) -> Result<()> {
-        let (path, old, new, selected, total) = {
+        let (path, old, new, apply_rows, is_staged, display_count) = {
             let Some(ds) = &self.diff_state else {
                 self.status_message = Some("No diff to stage from".into());
                 return Ok(());
@@ -1431,26 +1438,41 @@ impl App {
             if ds.view_mode != DiffViewMode::LineNav {
                 return Ok(());
             }
-            let lines = if ds.selected_lines.is_empty() {
+            let user_selected = if ds.selected_lines.is_empty() {
                 let mut s = BTreeSet::new();
                 s.insert(ds.cursor_line);
                 s
             } else {
                 ds.selected_lines.clone()
             };
-            let count = lines.len();
+            let count = user_selected.len();
+
+            // For staged files, the user selects lines to *unstage*.
+            // We invert: apply all changed rows except the selected ones.
+            let apply_rows = if ds.is_staged {
+                ds.hunk_changed_rows
+                    .iter()
+                    .copied()
+                    .filter(|r| !user_selected.contains(r))
+                    .collect::<BTreeSet<usize>>()
+            } else {
+                user_selected
+            };
+
             (
                 ds.file_path.clone(),
                 ds.old_content.clone(),
                 ds.new_content.clone(),
-                lines,
+                apply_rows,
+                ds.is_staged,
                 count,
             )
         };
 
-        let patched = git::apply_lines(&old, &new, &selected);
+        let patched = git::apply_lines(&old, &new, &apply_rows);
         self.repo.stage_content(&path, &patched)?;
-        self.status_message = Some(format!("Staged {total} line(s) of {path}"));
+        let verb = if is_staged { "Unstaged" } else { "Staged" };
+        self.status_message = Some(format!("{verb} {display_count} line(s) of {path}"));
         self.refresh()?;
         self.load_selected_diff()?;
         Ok(())
@@ -1570,6 +1592,7 @@ impl App {
                         hunk_changed_rows: prev_hunk_rows,
                         saved_line_selection: prev_saved,
                         viewport_height: prev_viewport,
+                        is_staged: staged,
                     });
                 }
                 Err(_) => {

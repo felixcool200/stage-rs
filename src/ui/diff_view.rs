@@ -81,6 +81,7 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
 
     let title = match &app.diff_state {
         Some(ds) => {
+            let panel_label = if ds.is_staged { "Index" } else { "Working Tree" };
             let mode_info = match ds.view_mode {
                 DiffViewMode::HunkNav if !ds.hunks.is_empty() => {
                     format!(" [hunk {}/{}]", ds.current_hunk + 1, ds.hunks.len())
@@ -88,12 +89,13 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
                 DiffViewMode::LineNav => {
                     let sel = ds.selected_lines.len();
                     let total = ds.hunk_changed_rows.len();
-                    format!(" [line {sel}/{total} selected | hunk {}/{}]",
+                    let verb = if ds.is_staged { "to unstage" } else { "selected" };
+                    format!(" [{sel}/{total} {verb} | hunk {}/{}]",
                             ds.current_hunk + 1, ds.hunks.len())
                 }
                 _ => String::new(),
             };
-            format!(" Working Tree: {}{} ", ds.file_path, mode_info)
+            format!(" {panel_label}: {}{} ", ds.file_path, mode_info)
         }
         None => " Working Tree ".into(),
     };

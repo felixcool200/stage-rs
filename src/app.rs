@@ -1571,6 +1571,37 @@ impl App {
     fn load_selected_diff(&mut self) -> Result<()> {
         if let Some(entry) = self.file_entries.get(self.selected_index) {
             let path = entry.path.clone();
+
+            // Auto-open conflict resolver for conflict files
+            if entry.status == FileStatus::Conflict {
+                self.diff_state = None;
+                let workdir = self.repo.workdir().to_path_buf();
+                let full_path = workdir.join(&path);
+                if let Ok(content) = std::fs::read_to_string(&full_path) {
+                    if let Some(parsed) = parse_conflicts(&content) {
+                        self.conflict_state = Some(ConflictState {
+                            file_path: path,
+                            sections: parsed.sections,
+                            current_section: 0,
+                            prefix: parsed.prefix,
+                            left_name: parsed.left_name.clone(),
+                            right_name: parsed.right_name.clone(),
+                        });
+                        self.status_message = Some(format!(
+                            "Conflict: ←={}  →={}  b=both  Enter=save  ↑/↓=navigate  Esc=exit",
+                            parsed.left_name, parsed.right_name,
+                        ));
+                        return Ok(());
+                    }
+                }
+                return Ok(());
+            }
+
+            // Close conflict resolver when navigating away from a conflict file
+            if self.conflict_state.is_some() {
+                self.conflict_state = None;
+            }
+
             let staged = matches!(entry.status, FileStatus::Staged(_));
             match self.repo.get_diff_content(&path, staged) {
                 Ok((old, new)) => {

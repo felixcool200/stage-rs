@@ -21,16 +21,22 @@ pub fn render(app: &App, frame: &mut Frame) {
     ])
     .areas(body);
 
-    let [diff_left, diff_right] = Layout::horizontal([
-        Constraint::Ratio(1, 2),
-        Constraint::Ratio(1, 2),
-    ])
-    .areas(diff_area);
-
     status_bar::render_header(app, frame, header);
     file_panel::render(app, frame, file_area);
-    diff_view::render_left(app, frame, diff_left);
-    diff_view::render_right(app, frame, diff_right);
+
+    if app.conflict_state.is_some() {
+        // Conflict resolver gets the full diff area
+        diff_view::render_right(app, frame, diff_area);
+    } else {
+        let [diff_left, diff_right] = Layout::horizontal([
+            Constraint::Ratio(1, 2),
+            Constraint::Ratio(1, 2),
+        ])
+        .areas(diff_area);
+        diff_view::render_left(app, frame, diff_left);
+        diff_view::render_right(app, frame, diff_right);
+    }
+
     status_bar::render_footer(app, frame, footer);
 
     // Render overlay on top

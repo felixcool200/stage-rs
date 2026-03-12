@@ -6,7 +6,7 @@ use color_eyre::Result;
 use git2::Repository;
 use std::path::Path;
 
-pub use diff::{apply_hunk, compute_diff, DiffLine, DiffLineKind, Hunk, LinePair};
+pub use diff::{apply_hunk, apply_lines, changed_rows_in_hunk, compute_diff, DiffLine, DiffLineKind, Hunk, LinePair};
 pub use status::{ChangeKind, FileEntry, FileStatus};
 
 pub struct GitRepo {

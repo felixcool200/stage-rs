@@ -1,4 +1,4 @@
-use crate::app::{App, Panel};
+use crate::app::{App, DiffViewMode, Panel};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -9,9 +9,20 @@ pub fn render_header(app: &App, frame: &mut Frame, area: Rect) {
     let branch = &app.branch_name;
     let file_count = app.file_entries.len();
 
-    let keybinds = match app.active_panel {
-        Panel::FileList => "  [s]tage file [u]nstage [d]iscard [r]efresh [q]uit ",
-        Panel::DiffView => "  [s]tage hunk [S]tage file [u]nstage [r]efresh [q]uit ",
+    let in_line_mode = app
+        .diff_state
+        .as_ref()
+        .map(|ds| ds.view_mode == DiffViewMode::LineNav)
+        .unwrap_or(false);
+
+    let keybinds = match (app.active_panel, in_line_mode) {
+        (Panel::FileList, _) => "  [s]tage file [u]nstage [d]iscard [r]efresh [q]uit ",
+        (Panel::DiffView, false) => {
+            "  [s]tage hunk [S]tage file Enter:line mode [u]nstage [q]uit "
+        }
+        (Panel::DiffView, true) => {
+            "  Space:toggle [a]ll [s]tage selected [S]tage file Esc:back [q]uit "
+        }
     };
 
     let line = Line::from(vec![
@@ -33,9 +44,16 @@ pub fn render_header(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
-    let panel_name = match app.active_panel {
-        Panel::FileList => "Files",
-        Panel::DiffView => "Diff",
+    let in_line_mode = app
+        .diff_state
+        .as_ref()
+        .map(|ds| ds.view_mode == DiffViewMode::LineNav)
+        .unwrap_or(false);
+
+    let panel_name = match (app.active_panel, in_line_mode) {
+        (Panel::FileList, _) => "Files",
+        (Panel::DiffView, false) => "Diff",
+        (Panel::DiffView, true) => "Lines",
     };
     let mut spans = vec![Span::styled(
         format!(" {panel_name} "),
@@ -47,11 +65,22 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             format!(" {} ", ds.file_path),
             Style::default().fg(Color::White),
         ));
-        if !ds.hunks.is_empty() {
-            spans.push(Span::styled(
-                format!("hunk {}/{} ", ds.current_hunk + 1, ds.hunks.len()),
-                Style::default().fg(Color::Cyan),
-            ));
+        match ds.view_mode {
+            DiffViewMode::HunkNav if !ds.hunks.is_empty() => {
+                spans.push(Span::styled(
+                    format!("hunk {}/{} ", ds.current_hunk + 1, ds.hunks.len()),
+                    Style::default().fg(Color::Cyan),
+                ));
+            }
+            DiffViewMode::LineNav => {
+                let sel = ds.selected_lines.len();
+                let total = ds.hunk_changed_rows.len();
+                spans.push(Span::styled(
+                    format!("{sel}/{total} lines selected "),
+                    Style::default().fg(Color::Magenta),
+                ));
+            }
+            _ => {}
         }
     }
 
@@ -62,9 +91,10 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         ));
     }
 
-    let nav_hint = match app.active_panel {
-        Panel::FileList => " | j/k:navigate Enter:select Tab:diff ",
-        Panel::DiffView => " | j/k:prev/next hunk Tab:files ",
+    let nav_hint = match (app.active_panel, in_line_mode) {
+        (Panel::FileList, _) => " | j/k:navigate Enter:select Tab:diff ",
+        (Panel::DiffView, false) => " | j/k:hunks Enter:line mode Tab:files ",
+        (Panel::DiffView, true) => " | j/k:lines Space:toggle s:stage Esc:back ",
     };
     spans.push(Span::styled(
         nav_hint,

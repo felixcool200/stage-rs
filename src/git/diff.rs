@@ -1,6 +1,7 @@
 use color_eyre::{eyre::eyre, Result};
 use git2::Repository;
 use similar::{ChangeTag, TextDiff};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 #[derive(Debug, Clone)]
@@ -83,7 +84,6 @@ pub fn compute_diff(
 
     let mut current_hunk_start: Option<usize> = None;
     let mut hunk_index: usize = 0;
-    // Track original line numbers for hunk headers
     let mut old_line: usize = 0;
     let mut new_line: usize = 0;
     let mut hunk_old_start: usize = 0;
@@ -97,7 +97,6 @@ pub fn compute_diff(
 
         match change.tag() {
             ChangeTag::Equal => {
-                // Close any open hunk
                 if let Some(start) = current_hunk_start.take() {
                     hunks.push(Hunk {
                         display_start: start,
@@ -189,7 +188,6 @@ pub fn compute_diff(
         }
     }
 
-    // Close final hunk if open
     if let Some(start) = current_hunk_start {
         hunks.push(Hunk {
             display_start: start,
@@ -208,7 +206,6 @@ pub fn compute_diff(
 }
 
 /// Apply only the specified hunk to the index content, producing a new file.
-/// `selected_hunk` is the index of the hunk to stage.
 pub fn apply_hunk(old: &str, new: &str, selected_hunk: usize) -> String {
     let diff = TextDiff::from_lines(old, new);
     let mut result = Vec::new();
@@ -227,23 +224,62 @@ pub fn apply_hunk(old: &str, new: &str, selected_hunk: usize) -> String {
             ChangeTag::Delete => {
                 in_change = true;
                 if current_hunk != selected_hunk {
-                    // Not staging this hunk — keep the old line
                     result.push(change.value().to_string());
                 }
-                // If staging: skip old line (it will be replaced by inserts)
             }
             ChangeTag::Insert => {
                 in_change = true;
                 if current_hunk == selected_hunk {
-                    // Staging this hunk — include the new line
                     result.push(change.value().to_string());
                 }
-                // If not staging: skip new line (keep old version)
             }
         }
     }
 
     result.join("")
+}
+
+/// Apply only the specified display rows to the index content.
+/// `selected_rows` contains display row indices of changed lines to stage.
+/// Display rows map 1:1 with diff changes (same order as compute_diff output).
+pub fn apply_lines(old: &str, new: &str, selected_rows: &BTreeSet<usize>) -> String {
+    let diff = TextDiff::from_lines(old, new);
+    let mut result = Vec::new();
+    let mut display_row: usize = 0;
+
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Equal => {
+                result.push(change.value().to_string());
+                display_row += 1;
+            }
+            ChangeTag::Delete => {
+                if !selected_rows.contains(&display_row) {
+                    // Not staging this deletion — keep the old line
+                    result.push(change.value().to_string());
+                }
+                display_row += 1;
+            }
+            ChangeTag::Insert => {
+                if selected_rows.contains(&display_row) {
+                    // Staging this addition — include the new line
+                    result.push(change.value().to_string());
+                }
+                display_row += 1;
+            }
+        }
+    }
+
+    result.join("")
+}
+
+/// Get all display rows that are changed lines within a hunk.
+pub fn changed_rows_in_hunk(hunk: &Hunk, left_lines: &[DiffLine]) -> Vec<usize> {
+    (hunk.display_start..hunk.display_end)
+        .filter(|&i| left_lines[i].hunk_index.is_some() && left_lines[i].kind != DiffLineKind::Spacer
+            || (i < left_lines.len() && left_lines[i].kind == DiffLineKind::Spacer
+                && left_lines[i].hunk_index.is_some()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -254,13 +290,10 @@ mod tests {
     fn test_apply_hunk_stages_only_selected() {
         let old = "line1\nline2\nline3\nline4\nline5\n";
         let new = "line1\nchanged2\nline3\nline4\nadded\nline5\n";
-        // Two hunks: hunk 0 = line2→changed2, hunk 1 = added line before line5
 
-        // Stage only hunk 0: line2 becomes changed2, but "added" is NOT included
         let result0 = apply_hunk(old, new, 0);
         assert_eq!(result0, "line1\nchanged2\nline3\nline4\nline5\n");
 
-        // Stage only hunk 1: line2 stays, but "added" IS included
         let result1 = apply_hunk(old, new, 1);
         assert_eq!(result1, "line1\nline2\nline3\nline4\nadded\nline5\n");
     }
@@ -279,7 +312,6 @@ mod tests {
         let old = "a\ndelete_me\nb\n";
         let new = "a\nb\n";
 
-        // Stage the deletion
         let result = apply_hunk(old, new, 0);
         assert_eq!(result, "a\nb\n");
     }
@@ -291,5 +323,64 @@ mod tests {
 
         let (_, _, _, hunks) = compute_diff(old, new);
         assert_eq!(hunks.len(), 2);
+    }
+
+    #[test]
+    fn test_apply_lines_selective() {
+        // old: line1, line2, line3, line4, line5
+        // new: line1, changed2, line3, changed4, line5
+        // Display rows:
+        //   0: Equal "line1"
+        //   1: Delete "line2"   (hunk 0)
+        //   2: Insert "changed2" (hunk 0)
+        //   3: Equal "line3"
+        //   4: Delete "line4"   (hunk 1)
+        //   5: Insert "changed4" (hunk 1)
+        //   6: Equal "line5"
+        let old = "line1\nline2\nline3\nline4\nline5\n";
+        let new = "line1\nchanged2\nline3\nchanged4\nline5\n";
+
+        // Stage only the first change (rows 1 and 2)
+        let mut selected = BTreeSet::new();
+        selected.insert(1); // delete line2
+        selected.insert(2); // insert changed2
+        let result = apply_lines(old, new, &selected);
+        assert_eq!(result, "line1\nchanged2\nline3\nline4\nline5\n");
+
+        // Stage only the second change (rows 4 and 5)
+        let mut selected = BTreeSet::new();
+        selected.insert(4); // delete line4
+        selected.insert(5); // insert changed4
+        let result = apply_lines(old, new, &selected);
+        assert_eq!(result, "line1\nline2\nline3\nchanged4\nline5\n");
+    }
+
+    #[test]
+    fn test_apply_lines_stage_only_addition() {
+        // Stage only the insert, not the delete in a replace
+        let old = "a\nold\nb\n";
+        let new = "a\nnew\nb\n";
+        // row 0: Equal "a"
+        // row 1: Delete "old"
+        // row 2: Insert "new"
+        // row 3: Equal "b"
+
+        // Stage only the addition (keep old line AND add new)
+        let mut selected = BTreeSet::new();
+        selected.insert(2);
+        let result = apply_lines(old, new, &selected);
+        assert_eq!(result, "a\nold\nnew\nb\n");
+    }
+
+    #[test]
+    fn test_apply_lines_stage_only_deletion() {
+        let old = "a\nold\nb\n";
+        let new = "a\nnew\nb\n";
+
+        // Stage only the deletion (remove old, don't add new)
+        let mut selected = BTreeSet::new();
+        selected.insert(1);
+        let result = apply_lines(old, new, &selected);
+        assert_eq!(result, "a\nb\n");
     }
 }

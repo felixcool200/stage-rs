@@ -1,4 +1,4 @@
-use crate::app::{App, Panel};
+use crate::app::{App, DiffViewMode, Panel};
 use crate::git::DiffLineKind;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -13,8 +13,7 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
         .border_style(Style::default().fg(Color::DarkGray));
 
     let Some(ds) = &app.diff_state else {
-        let placeholder =
-            Paragraph::new("Select a file to view diff").block(block);
+        let placeholder = Paragraph::new("Select a file to view diff").block(block);
         frame.render_widget(placeholder, area);
         return;
     };
@@ -29,23 +28,31 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
         .skip(ds.scroll)
         .take(visible_height)
         .map(|(i, dl)| {
-            let is_current_hunk = is_focused
-                && dl.hunk_index.is_some()
-                && dl.hunk_index == ds.hunks.get(ds.current_hunk).and_then(|h| {
-                    // Check if this display line is in the current hunk
-                    if i >= h.display_start && i < h.display_end {
-                        ds.left_lines[i].hunk_index
-                    } else {
-                        None
-                    }
-                });
-
+            let highlight = get_line_highlight(ds, i, is_focused);
             let line_num = format!("{:>4} ", i + 1);
-            let (num_style, text_style) = line_styles(dl.kind.clone(), is_current_hunk);
-            Line::from(vec![
-                Span::styled(line_num, num_style),
-                Span::styled(&dl.content, text_style),
-            ])
+            let (num_style, text_style) = line_styles(&dl.kind, &highlight);
+
+            let mut spans = Vec::new();
+            // Show selection indicator in line mode
+            if ds.view_mode == DiffViewMode::LineNav && dl.hunk_index.is_some() {
+                let marker = if ds.selected_lines.contains(&i) {
+                    Span::styled(
+                        "[x]",
+                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    )
+                } else if i == ds.cursor_line {
+                    Span::styled(
+                        "[ ]",
+                        Style::default().fg(Color::Yellow),
+                    )
+                } else {
+                    Span::styled("   ", Style::default())
+                };
+                spans.push(marker);
+            }
+            spans.push(Span::styled(line_num, num_style));
+            spans.push(Span::styled(&dl.content, text_style));
+            Line::from(spans)
         })
         .collect();
 
@@ -63,12 +70,18 @@ pub fn render_right(app: &App, frame: &mut Frame, area: Rect) {
 
     let title = match &app.diff_state {
         Some(ds) => {
-            let hunk_info = if ds.hunks.is_empty() {
-                String::new()
-            } else {
-                format!(" [hunk {}/{}]", ds.current_hunk + 1, ds.hunks.len())
+            let mode_info = match ds.view_mode {
+                DiffViewMode::HunkNav if !ds.hunks.is_empty() => {
+                    format!(" [hunk {}/{}]", ds.current_hunk + 1, ds.hunks.len())
+                }
+                DiffViewMode::LineNav => {
+                    let sel = ds.selected_lines.len();
+                    let total = ds.hunk_changed_rows.len();
+                    format!(" [line mode: {sel}/{total} selected]")
+                }
+                _ => String::new(),
             };
-            format!(" Working Tree: {}{} ", ds.file_path, hunk_info)
+            format!(" Working Tree: {}{} ", ds.file_path, mode_info)
         }
         None => " Working Tree ".into(),
     };
@@ -92,26 +105,40 @@ pub fn render_right(app: &App, frame: &mut Frame, area: Rect) {
         .skip(ds.scroll)
         .take(visible_height)
         .map(|(i, dl)| {
-            let is_current_hunk = is_focused
-                && dl.hunk_index.is_some()
-                && ds
-                    .hunks
-                    .get(ds.current_hunk)
-                    .map(|h| i >= h.display_start && i < h.display_end)
-                    .unwrap_or(false);
+            let highlight = get_line_highlight(ds, i, is_focused);
 
-            // Show hunk header line at the start of the current hunk
-            if is_current_hunk && ds.hunks.get(ds.current_hunk).map(|h| h.display_start) == Some(i)
+            // Show hunk header at the start of the current hunk (only in hunk mode)
+            if ds.view_mode == DiffViewMode::HunkNav
+                && highlight == LineHighlight::CurrentHunk
+                && ds.hunks.get(ds.current_hunk).map(|h| h.display_start) == Some(i)
             {
                 return hunk_header_line(ds, i);
             }
 
             let line_num = format!("{:>4} ", i + 1);
-            let (num_style, text_style) = line_styles(dl.kind.clone(), is_current_hunk);
-            Line::from(vec![
-                Span::styled(line_num, num_style),
-                Span::styled(&dl.content, text_style),
-            ])
+            let (num_style, text_style) = line_styles(&dl.kind, &highlight);
+
+            let mut spans = Vec::new();
+            // Show selection indicator in line mode
+            if ds.view_mode == DiffViewMode::LineNav && dl.hunk_index.is_some() {
+                let marker = if ds.selected_lines.contains(&i) {
+                    Span::styled(
+                        "[x]",
+                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    )
+                } else if i == ds.cursor_line {
+                    Span::styled(
+                        "[ ]",
+                        Style::default().fg(Color::Yellow),
+                    )
+                } else {
+                    Span::styled("   ", Style::default())
+                };
+                spans.push(marker);
+            }
+            spans.push(Span::styled(line_num, num_style));
+            spans.push(Span::styled(&dl.content, text_style));
+            Line::from(spans)
         })
         .collect();
 
@@ -119,14 +146,57 @@ pub fn render_right(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
+#[derive(PartialEq, Eq)]
+enum LineHighlight {
+    None,
+    CurrentHunk,
+    CursorLine,
+    SelectedLine,
+}
+
+fn get_line_highlight(
+    ds: &crate::app::DiffState,
+    display_row: usize,
+    is_focused: bool,
+) -> LineHighlight {
+    if !is_focused {
+        return LineHighlight::None;
+    }
+
+    match ds.view_mode {
+        DiffViewMode::LineNav => {
+            if ds.selected_lines.contains(&display_row) {
+                LineHighlight::SelectedLine
+            } else if display_row == ds.cursor_line {
+                LineHighlight::CursorLine
+            } else {
+                LineHighlight::None
+            }
+        }
+        DiffViewMode::HunkNav => {
+            if let Some(hunk) = ds.hunks.get(ds.current_hunk) {
+                if display_row >= hunk.display_start
+                    && display_row < hunk.display_end
+                    && ds.left_lines[display_row].hunk_index.is_some()
+                {
+                    LineHighlight::CurrentHunk
+                } else {
+                    LineHighlight::None
+                }
+            } else {
+                LineHighlight::None
+            }
+        }
+    }
+}
+
 fn hunk_header_line(ds: &crate::app::DiffState, display_row: usize) -> Line<'static> {
     let hunk = &ds.hunks[ds.current_hunk];
     let dl = &ds.right_lines[display_row];
     let line_num = format!("{:>4} ", display_row + 1);
 
-    let (num_style, text_style) = line_styles(dl.kind.clone(), true);
+    let (num_style, text_style) = line_styles(&dl.kind, &LineHighlight::CurrentHunk);
 
-    // Show the hunk header + content on the first line
     Line::from(vec![
         Span::styled(
             format!("{} ", hunk.header),
@@ -139,11 +209,12 @@ fn hunk_header_line(ds: &crate::app::DiffState, display_row: usize) -> Line<'sta
     ])
 }
 
-fn line_styles(kind: DiffLineKind, is_current_hunk: bool) -> (Style, Style) {
-    let bg = if is_current_hunk {
-        Color::Rgb(30, 30, 50)
-    } else {
-        Color::Reset
+fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight) -> (Style, Style) {
+    let (bg, change_bg_boost) = match highlight {
+        LineHighlight::CursorLine => (Color::Rgb(50, 50, 20), true),
+        LineHighlight::SelectedLine => (Color::Rgb(20, 50, 20), true),
+        LineHighlight::CurrentHunk => (Color::Rgb(30, 30, 50), true),
+        LineHighlight::None => (Color::Reset, false),
     };
 
     match kind {
@@ -153,7 +224,7 @@ fn line_styles(kind: DiffLineKind, is_current_hunk: bool) -> (Style, Style) {
         ),
         DiffLineKind::Removed => (
             Style::default().fg(Color::DarkGray).bg(bg),
-            Style::default().fg(Color::Red).bg(if is_current_hunk {
+            Style::default().fg(Color::Red).bg(if change_bg_boost {
                 Color::Rgb(60, 20, 20)
             } else {
                 Color::Reset
@@ -161,7 +232,7 @@ fn line_styles(kind: DiffLineKind, is_current_hunk: bool) -> (Style, Style) {
         ),
         DiffLineKind::Added => (
             Style::default().fg(Color::DarkGray).bg(bg),
-            Style::default().fg(Color::Green).bg(if is_current_hunk {
+            Style::default().fg(Color::Green).bg(if change_bg_boost {
                 Color::Rgb(20, 60, 20)
             } else {
                 Color::Reset

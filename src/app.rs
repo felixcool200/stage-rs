@@ -68,10 +68,11 @@ pub enum Overlay {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum PendingAction {
     CommitAmend,
     UndoLastCommit,
+    DiscardChanges { path: String },
 }
 
 impl Overlay {
@@ -300,9 +301,10 @@ impl App {
                     let path = entry.path.clone();
                     match entry.status {
                         FileStatus::Unstaged(_) | FileStatus::Conflict => {
-                            self.repo.discard_changes(&path)?;
-                            self.status_message = Some(format!("Discarded: {path}"));
-                            self.refresh()?;
+                            self.overlay = Overlay::Confirm {
+                                message: format!("Discard changes to {path}? This cannot be undone."),
+                                action: PendingAction::DiscardChanges { path },
+                            };
                         }
                         _ => {
                             self.status_message =
@@ -406,7 +408,7 @@ impl App {
             }
             Message::ConfirmAction => {
                 let action = match &self.overlay {
-                    Overlay::Confirm { action, .. } => *action,
+                    Overlay::Confirm { action, .. } => action.clone(),
                     _ => return Ok(()),
                 };
                 self.overlay = Overlay::None;
@@ -431,6 +433,17 @@ impl App {
                             }
                             Err(e) => {
                                 self.status_message = Some(format!("Undo failed: {e}"));
+                            }
+                        }
+                    }
+                    PendingAction::DiscardChanges { path } => {
+                        match self.repo.discard_changes(&path) {
+                            Ok(()) => {
+                                self.status_message = Some(format!("Discarded: {path}"));
+                                self.refresh()?;
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Discard failed: {e}"));
                             }
                         }
                     }

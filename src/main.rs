@@ -7,42 +7,27 @@ mod ui;
 
 use app::{App, Overlay};
 use color_eyre::Result;
-use keymap::KeymapName;
 use std::time::Duration;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
 
     let mut path = ".".to_string();
-    let mut keymap = KeymapName::Vim;
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--keymap" | "-k" => {
-                i += 1;
-                if let Some(name) = args.get(i) {
-                    keymap = KeymapName::from_str(name).unwrap_or_else(|| {
-                        eprintln!("Unknown keymap '{}', using vim. Options: vim, helix", name);
-                        KeymapName::Vim
-                    });
-                }
-            }
             "--help" | "-h" => {
                 println!("gitview-rs - TUI git client with side-by-side diff view");
                 println!();
-                println!("USAGE: gitview-rs [OPTIONS] [PATH]");
+                println!("USAGE: gitview-rs [PATH]");
                 println!();
                 println!("ARGS:");
                 println!("  [PATH]  Path to git repository (default: current directory)");
                 println!();
                 println!("OPTIONS:");
-                println!("  -k, --keymap <NAME>  Keymap to use: vim (default), helix");
-                println!("  -h, --help           Show this help");
-                println!();
-                println!("RUNTIME:");
-                println!("  Ctrl+K  Cycle between keymaps");
+                println!("  -h, --help  Show this help");
                 return Ok(());
             }
             other => {
@@ -53,7 +38,7 @@ fn main() -> Result<()> {
     }
 
     let mut terminal = ratatui::init();
-    let mut app = App::new(&path, keymap)?;
+    let mut app = App::new(&path)?;
     let result = run(&mut terminal, &mut app);
     ratatui::restore();
     result

@@ -1,5 +1,4 @@
 use crate::git::{self, BlameLine, BranchEntry, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair, LogEntry, StashEntry};
-use crate::keymap::KeymapName;
 use crate::syntax::Highlighter;
 use color_eyre::Result;
 use std::collections::BTreeSet;
@@ -16,7 +15,6 @@ pub struct App {
     pub should_quit: bool,
     pub status_message: Option<String>,
     pub last_refresh: Instant,
-    pub keymap: KeymapName,
     pub overlay: Overlay,
     /// Saved commit message from undo, pre-filled on next commit
     pub saved_commit_msg: Option<String>,
@@ -320,7 +318,6 @@ pub enum Message {
     ToggleLine,
     StageLines,
     SelectAllLines,
-    CycleKeymap,
     YankToClipboard,
     // Filter
     StartFilter,
@@ -360,7 +357,7 @@ pub enum Message {
 // ── App ──────────────────────────────────────────────────────────────────────
 
 impl App {
-    pub fn new(path: &str, keymap: KeymapName) -> Result<Self> {
+    pub fn new(path: &str) -> Result<Self> {
         let repo = GitRepo::open(path)?;
         let branch_name = repo.branch_name();
         let ahead_behind = repo.ahead_behind();
@@ -377,7 +374,6 @@ impl App {
             should_quit: false,
             status_message: None,
             last_refresh: Instant::now(),
-            keymap,
             overlay: Overlay::None,
             saved_commit_msg: None,
             file_filter: None,
@@ -507,10 +503,7 @@ impl App {
                     ds.hunk_changed_rows = changed;
                     ds.selected_lines.clear();
                     ds.view_mode = DiffViewMode::LineNav;
-                    self.status_message = Some(match self.keymap {
-                        KeymapName::Vim => "Line mode: j/k navigate, Space toggle, a all, s stage, Esc back".into(),
-                        KeymapName::Helix => "Line mode: j/k navigate, x toggle, X all, s stage, Esc back".into(),
-                    });
+                    self.status_message = Some("Line mode: ↑/↓ navigate, Space toggle, a all, s stage, Esc back".into());
                 }
             }
             Message::SplitHunk => {
@@ -763,10 +756,6 @@ impl App {
             }
             Message::StageLines => {
                 self.stage_selected_lines()?;
-            }
-            Message::CycleKeymap => {
-                self.keymap = self.keymap.cycle();
-                self.status_message = Some(format!("Keymap: {}", self.keymap.label()));
             }
             Message::YankToClipboard => {
                 let text = self.get_yank_text();

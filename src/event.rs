@@ -60,7 +60,7 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
         }
     };
 
-    Ok(keymap::resolve(app.keymap, ctx, key))
+    Ok(keymap::resolve(ctx, key))
 }
 
 /// Handle keys in the commit message input overlay.

@@ -310,7 +310,7 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
     let (left_fg, left_border, left_bg) = if left_selected {
         (Color::Cyan, Color::Cyan, Color::Rgb(10, 40, 50))
     } else if focused {
-        (Color::Rgb(120, 200, 220), Color::Rgb(80, 140, 160), Color::Rgb(8, 25, 30))
+        (Color::Rgb(80, 140, 160), Color::Rgb(50, 90, 100), Color::Rgb(5, 18, 22))
     } else {
         (Color::DarkGray, Color::DarkGray, Color::Reset)
     };

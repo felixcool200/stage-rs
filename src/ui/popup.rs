@@ -21,6 +21,9 @@ pub fn render(app: &App, frame: &mut Frame) {
         } => {
             render_git_log(frame, entries, *selected, *scroll);
         }
+        Overlay::StashList { entries, selected } => {
+            render_stash_list(frame, entries, *selected);
+        }
     }
 }
 
@@ -161,6 +164,50 @@ fn render_git_log(
                 Span::styled(
                     format!("{} ", e.author),
                     Style::default().fg(Color::Green),
+                ),
+                Span::styled(&e.message, Style::default().fg(Color::White)),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn render_stash_list(
+    frame: &mut Frame,
+    entries: &[crate::git::StashEntry],
+    selected: usize,
+) {
+    let area = centered_rect(70, 50, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(format!(
+            " Stashes ({}) [p]op [a]pply [d]rop [q]close ",
+            entries.len()
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Magenta));
+
+    let items: Vec<ListItem> = entries
+        .iter()
+        .map(|e| {
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("stash@{{{}}} ", e.index),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(&e.message, Style::default().fg(Color::White)),
             ]))

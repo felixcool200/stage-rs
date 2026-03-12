@@ -36,6 +36,7 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
             Overlay::Confirm { .. } => handle_confirm(key.code),
             Overlay::CommitInput { .. } => handle_commit_input(key.modifiers, key.code),
             Overlay::GitLog { .. } => handle_git_log(key.code),
+            Overlay::StashList { .. } => handle_stash_list(key.code),
             Overlay::None => unreachable!(),
         });
     }
@@ -78,6 +79,18 @@ fn handle_confirm(code: KeyCode) -> Option<Message> {
     match code {
         KeyCode::Char('y') | KeyCode::Enter => Some(Message::ConfirmAction),
         KeyCode::Char('n') | KeyCode::Esc => Some(Message::CloseOverlay),
+        _ => None,
+    }
+}
+
+fn handle_stash_list(code: KeyCode) -> Option<Message> {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseOverlay),
+        KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
+        KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
+        KeyCode::Char('p') | KeyCode::Enter => Some(Message::StashPop),
+        KeyCode::Char('a') => Some(Message::StashApply),
+        KeyCode::Char('d') => Some(Message::StashDrop),
         _ => None,
     }
 }

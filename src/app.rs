@@ -1,4 +1,4 @@
-use crate::git::{self, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair, LogEntry};
+use crate::git::{self, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LinePair, LogEntry, StashEntry};
 use crate::keymap::KeymapName;
 use color_eyre::Result;
 use std::collections::BTreeSet;
@@ -66,6 +66,10 @@ pub enum Overlay {
         entries: Vec<LogEntry>,
         selected: usize,
         scroll: usize,
+    },
+    StashList {
+        entries: Vec<StashEntry>,
+        selected: usize,
     },
 }
 
@@ -212,6 +216,12 @@ pub enum Message {
     SelectAllLines,
     CycleKeymap,
     YankToClipboard,
+    // Stash
+    StashSave,
+    OpenStashList,
+    StashPop,
+    StashApply,
+    StashDrop,
     // Commit / log
     OpenCommit,
     OpenCommitAmend,
@@ -403,6 +413,100 @@ impl App {
                 }
             }
 
+            // ── Stash ─────────────────────────────────────────────────────
+            Message::StashSave => {
+                match self.repo.stash_save(None) {
+                    Ok(()) => {
+                        self.status_message = Some("Stashed changes".into());
+                        self.refresh()?;
+                        if self.diff_state.is_some() {
+                            self.load_selected_diff()?;
+                        }
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Stash failed: {e}"));
+                    }
+                }
+            }
+            Message::OpenStashList => {
+                match self.repo.stash_list() {
+                    Ok(entries) => {
+                        if entries.is_empty() {
+                            self.status_message = Some("No stashes".into());
+                        } else {
+                            self.overlay = Overlay::StashList {
+                                entries,
+                                selected: 0,
+                            };
+                        }
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Stash list failed: {e}"));
+                    }
+                }
+            }
+            Message::StashPop => {
+                if let Overlay::StashList { entries, selected } = &self.overlay {
+                    let idx = entries.get(*selected).map(|e| e.index);
+                    if let Some(idx) = idx {
+                        let sel = *selected;
+                        self.overlay = Overlay::None;
+                        match self.repo.stash_pop(idx) {
+                            Ok(()) => {
+                                self.status_message = Some(format!("Popped stash@{{{sel}}}"));
+                                self.refresh()?;
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Stash pop failed: {e}"));
+                            }
+                        }
+                    }
+                }
+            }
+            Message::StashApply => {
+                if let Overlay::StashList { entries, selected, .. } = &self.overlay {
+                    let idx = entries.get(*selected).map(|e| e.index);
+                    if let Some(idx) = idx {
+                        let sel = *selected;
+                        match self.repo.stash_apply(idx) {
+                            Ok(()) => {
+                                self.status_message = Some(format!("Applied stash@{{{sel}}}"));
+                                self.refresh()?;
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Stash apply failed: {e}"));
+                            }
+                        }
+                    }
+                }
+            }
+            Message::StashDrop => {
+                if let Overlay::StashList { entries, selected } = &self.overlay {
+                    let idx = entries.get(*selected).map(|e| e.index);
+                    let sel = *selected;
+                    if let Some(idx) = idx {
+                        self.overlay = Overlay::None;
+                        match self.repo.stash_drop(idx) {
+                            Ok(()) => {
+                                self.status_message = Some(format!("Dropped stash@{{{sel}}}"));
+                                // Reopen stash list
+                                if let Ok(new_entries) = self.repo.stash_list() {
+                                    if !new_entries.is_empty() {
+                                        self.overlay = Overlay::StashList {
+                                            selected: sel.min(new_entries.len().saturating_sub(1)),
+                                            entries: new_entries,
+                                        };
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Stash drop failed: {e}"));
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── Commit / Log ─────────────────────────────────────────────
             Message::OpenCommit => {
                 if !self.repo.has_staged_changes() {
@@ -544,6 +648,12 @@ impl App {
                 input.move_up();
                 return;
             }
+            Overlay::StashList { selected, .. } => {
+                if *selected > 0 {
+                    *selected -= 1;
+                }
+                return;
+            }
             Overlay::Confirm { .. } => return,
             Overlay::None => {}
         }
@@ -594,6 +704,12 @@ impl App {
             }
             Overlay::CommitInput { input, .. } => {
                 input.move_down();
+                return;
+            }
+            Overlay::StashList { entries, selected } => {
+                if *selected < entries.len().saturating_sub(1) {
+                    *selected += 1;
+                }
                 return;
             }
             Overlay::Confirm { .. } => return,

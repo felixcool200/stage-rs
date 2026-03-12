@@ -9,6 +9,7 @@ use std::path::Path;
 
 pub use diff::{apply_hunk, apply_lines, changed_rows_in_hunk, compute_diff, DiffLine, DiffLineKind, Hunk, LinePair};
 pub use log::LogEntry;
+pub use operations::StashEntry;
 pub use status::{ChangeKind, FileEntry, FileStatus};
 
 pub struct GitRepo {
@@ -79,6 +80,26 @@ impl GitRepo {
 
     pub fn workdir(&self) -> &Path {
         self.repo.workdir().expect("bare repositories not supported")
+    }
+
+    pub fn stash_save(&mut self, message: Option<&str>) -> Result<()> {
+        operations::stash_save(&mut self.repo, message)
+    }
+
+    pub fn stash_pop(&mut self, index: usize) -> Result<()> {
+        operations::stash_pop(&mut self.repo, index)
+    }
+
+    pub fn stash_apply(&mut self, index: usize) -> Result<()> {
+        operations::stash_apply(&mut self.repo, index)
+    }
+
+    pub fn stash_drop(&mut self, index: usize) -> Result<()> {
+        operations::stash_drop(&mut self.repo, index)
+    }
+
+    pub fn stash_list(&mut self) -> Result<Vec<StashEntry>> {
+        operations::stash_list(&mut self.repo)
     }
 
     /// Returns (ahead, behind) relative to the upstream tracking branch.

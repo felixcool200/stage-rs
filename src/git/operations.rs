@@ -152,6 +152,51 @@ pub fn last_commit_message(repo: &Repository) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+// ── Stash ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct StashEntry {
+    pub index: usize,
+    pub message: String,
+}
+
+pub fn stash_save(repo: &mut Repository, message: Option<&str>) -> Result<()> {
+    let sig = repo
+        .signature()
+        .or_else(|_| Signature::now("gitview-rs", "gitview@localhost"))
+        .map_err(|e| eyre!("Cannot create signature: {e}"))?;
+    let msg = message.unwrap_or("gitview-rs stash");
+    repo.stash_save(&sig, msg, Some(git2::StashFlags::DEFAULT))?;
+    Ok(())
+}
+
+pub fn stash_pop(repo: &mut Repository, index: usize) -> Result<()> {
+    repo.stash_pop(index, None)?;
+    Ok(())
+}
+
+pub fn stash_apply(repo: &mut Repository, index: usize) -> Result<()> {
+    repo.stash_apply(index, None)?;
+    Ok(())
+}
+
+pub fn stash_drop(repo: &mut Repository, index: usize) -> Result<()> {
+    repo.stash_drop(index)?;
+    Ok(())
+}
+
+pub fn stash_list(repo: &mut Repository) -> Result<Vec<StashEntry>> {
+    let mut entries = Vec::new();
+    repo.stash_foreach(|index, message, _oid| {
+        entries.push(StashEntry {
+            index,
+            message: message.to_string(),
+        });
+        true
+    })?;
+    Ok(entries)
+}
+
 pub fn has_staged_changes(repo: &Repository) -> bool {
     let Ok(statuses) = repo.statuses(None) else {
         return false;

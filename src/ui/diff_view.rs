@@ -309,10 +309,12 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, area: Rect) {
 }
 
 fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        format!("{:width$}", s, width = max_len)
+    let chars: Vec<char> = s.chars().take(max_len).collect();
+    let truncated: String = chars.iter().collect();
+    if chars.len() < max_len {
+        format!("{truncated}{}", " ".repeat(max_len - chars.len()))
     } else {
-        s[..max_len].to_string()
+        truncated
     }
 }
 

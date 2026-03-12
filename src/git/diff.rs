@@ -29,7 +29,6 @@ pub struct LinePair {
 pub struct Hunk {
     pub display_start: usize,
     pub display_end: usize, // exclusive
-    pub header: String,     // e.g. "@@ -10,5 +12,7 @@"
 }
 
 /// Get diff content for a file.
@@ -92,12 +91,6 @@ pub fn compute_diff(
 
     let mut current_hunk_start: Option<usize> = None;
     let mut hunk_index: usize = 0;
-    let mut old_line: usize = 0;
-    let mut new_line: usize = 0;
-    let mut hunk_old_start: usize = 0;
-    let mut hunk_new_start: usize = 0;
-    let mut hunk_old_count: usize = 0;
-    let mut hunk_new_count: usize = 0;
 
     for change in diff.iter_all_changes() {
         let text = change.value().trim_end_matches('\n').to_string();
@@ -109,13 +102,6 @@ pub fn compute_diff(
                     hunks.push(Hunk {
                         display_start: start,
                         display_end: display_row,
-                        header: format!(
-                            "@@ -{},{} +{},{} @@",
-                            hunk_old_start + 1,
-                            hunk_old_count,
-                            hunk_new_start + 1,
-                            hunk_new_count
-                        ),
                     });
                     hunk_index += 1;
                 }
@@ -136,18 +122,11 @@ pub fn compute_diff(
                     left: Some(li),
                     right: Some(ri),
                 });
-                old_line += 1;
-                new_line += 1;
             }
             ChangeTag::Delete => {
                 if current_hunk_start.is_none() {
                     current_hunk_start = Some(display_row);
-                    hunk_old_start = old_line;
-                    hunk_new_start = new_line;
-                    hunk_old_count = 0;
-                    hunk_new_count = 0;
                 }
-                hunk_old_count += 1;
 
                 let li = left_lines.len();
                 left_lines.push(DiffLine {
@@ -164,17 +143,11 @@ pub fn compute_diff(
                     left: Some(li),
                     right: None,
                 });
-                old_line += 1;
             }
             ChangeTag::Insert => {
                 if current_hunk_start.is_none() {
                     current_hunk_start = Some(display_row);
-                    hunk_old_start = old_line;
-                    hunk_new_start = new_line;
-                    hunk_old_count = 0;
-                    hunk_new_count = 0;
                 }
-                hunk_new_count += 1;
 
                 let ri = right_lines.len();
                 left_lines.push(DiffLine {
@@ -191,7 +164,6 @@ pub fn compute_diff(
                     left: None,
                     right: Some(ri),
                 });
-                new_line += 1;
             }
         }
     }
@@ -200,13 +172,6 @@ pub fn compute_diff(
         hunks.push(Hunk {
             display_start: start,
             display_end: left_lines.len(),
-            header: format!(
-                "@@ -{},{} +{},{} @@",
-                hunk_old_start + 1,
-                hunk_old_count,
-                hunk_new_start + 1,
-                hunk_new_count
-            ),
         });
     }
 

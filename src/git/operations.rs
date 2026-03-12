@@ -96,8 +96,25 @@ pub fn commit(repo: &Repository, message: &str) -> Result<String> {
         Err(_) => None, // Initial commit
     };
 
-    let parents: Vec<&git2::Commit> = parent.iter().collect();
-    let oid = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)?;
+    let mut parents: Vec<git2::Commit> = parent.into_iter().collect();
+
+    // During a merge, include MERGE_HEAD as a second parent
+    if let Ok(merge_head_bytes) = std::fs::read(repo.path().join("MERGE_HEAD")) {
+        let merge_head_str = String::from_utf8_lossy(&merge_head_bytes);
+        if let Ok(oid) = git2::Oid::from_str(merge_head_str.trim()) {
+            if let Ok(commit) = repo.find_commit(oid) {
+                parents.push(commit);
+            }
+        }
+    }
+
+    let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+    let oid = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parent_refs)?;
+
+    // Clean up merge state files after successful merge commit
+    let _ = std::fs::remove_file(repo.path().join("MERGE_HEAD"));
+    let _ = std::fs::remove_file(repo.path().join("MERGE_MSG"));
+    let _ = std::fs::remove_file(repo.path().join("MERGE_MODE"));
 
     Ok(oid.to_string()[..7].to_string())
 }
@@ -166,7 +183,7 @@ pub fn stash_save(repo: &mut Repository, message: Option<&str>) -> Result<()> {
         .or_else(|_| Signature::now("stage-rs", "stage-rs@localhost"))
         .map_err(|e| eyre!("Cannot create signature: {e}"))?;
     let msg = message.unwrap_or("stage-rs stash");
-    repo.stash_save(&sig, msg, Some(git2::StashFlags::DEFAULT))?;
+    repo.stash_save(&sig, msg, Some(git2::StashFlags::INCLUDE_UNTRACKED))?;
     Ok(())
 }
 
@@ -265,6 +282,35 @@ pub fn git_fetch(workdir: &Path) -> Result<String> {
     if output.status.success() {
         let msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
         Ok(if msg.is_empty() { "Fetched successfully".into() } else { msg })
+    } else {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(eyre!("{err}"))
+    }
+}
+
+pub fn git_rebase_continue(workdir: &Path) -> Result<String> {
+    let output = std::process::Command::new("git")
+        .args(["rebase", "--continue"])
+        .env("GIT_EDITOR", "true")
+        .current_dir(workdir)
+        .output()
+        .map_err(|e| eyre!("Failed to run git rebase --continue: {e}"))?;
+    if output.status.success() {
+        Ok("Rebase continue successful".into())
+    } else {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(eyre!("{err}"))
+    }
+}
+
+pub fn git_rebase_abort(workdir: &Path) -> Result<String> {
+    let output = std::process::Command::new("git")
+        .args(["rebase", "--abort"])
+        .current_dir(workdir)
+        .output()
+        .map_err(|e| eyre!("Failed to run git rebase --abort: {e}"))?;
+    if output.status.success() {
+        Ok("Rebase aborted".into())
     } else {
         let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
         Err(eyre!("{err}"))

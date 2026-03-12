@@ -89,8 +89,8 @@ fn handle_confirm(code: KeyCode) -> Option<Message> {
 fn handle_stash_list(code: KeyCode) -> Option<Message> {
     match code {
         KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseOverlay),
-        KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
-        KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
+        KeyCode::Down => Some(Message::MoveDown),
+        KeyCode::Up => Some(Message::MoveUp),
         KeyCode::Char('p') | KeyCode::Enter => Some(Message::StashPop),
         KeyCode::Char('a') => Some(Message::StashApply),
         KeyCode::Char('d') => Some(Message::StashDrop),
@@ -101,8 +101,8 @@ fn handle_stash_list(code: KeyCode) -> Option<Message> {
 fn handle_branch_list(code: KeyCode) -> Option<Message> {
     match code {
         KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseOverlay),
-        KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
-        KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
+        KeyCode::Down => Some(Message::MoveDown),
+        KeyCode::Up => Some(Message::MoveUp),
         KeyCode::Enter => Some(Message::CheckoutBranch),
         KeyCode::Char('n') => Some(Message::StartCreateBranch),
         _ => None,
@@ -112,8 +112,8 @@ fn handle_branch_list(code: KeyCode) -> Option<Message> {
 fn handle_git_log(code: KeyCode) -> Option<Message> {
     match code {
         KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseOverlay),
-        KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
-        KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
+        KeyCode::Down => Some(Message::MoveDown),
+        KeyCode::Up => Some(Message::MoveUp),
         KeyCode::Char('y') => Some(Message::YankToClipboard),
         KeyCode::Enter => Some(Message::ViewCommitDetail),
         KeyCode::Char('r') => Some(Message::StartRebase),
@@ -124,11 +124,11 @@ fn handle_git_log(code: KeyCode) -> Option<Message> {
 fn handle_rebase(code: KeyCode, modifiers: KeyModifiers) -> Option<Message> {
     match (modifiers, code) {
         (_, KeyCode::Esc) | (_, KeyCode::Char('q')) => Some(Message::CloseOverlay),
-        (_, KeyCode::Char('j')) | (_, KeyCode::Down) => Some(Message::MoveDown),
-        (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(Message::MoveUp),
+        (KeyModifiers::SHIFT, KeyCode::Down) => Some(Message::RebaseMoveDown),
+        (KeyModifiers::SHIFT, KeyCode::Up) => Some(Message::RebaseMoveUp),
+        (_, KeyCode::Down) => Some(Message::MoveDown),
+        (_, KeyCode::Up) => Some(Message::MoveUp),
         (_, KeyCode::Char(' ') | KeyCode::Char('c')) => Some(Message::RebaseCycleAction),
-        (KeyModifiers::SHIFT, KeyCode::Char('J')) => Some(Message::RebaseMoveDown),
-        (KeyModifiers::SHIFT, KeyCode::Char('K')) => Some(Message::RebaseMoveUp),
         (_, KeyCode::Enter) => Some(Message::RebaseExecute),
         _ => None,
     }
@@ -137,8 +137,8 @@ fn handle_rebase(code: KeyCode, modifiers: KeyModifiers) -> Option<Message> {
 fn handle_commit_detail(code: KeyCode) -> Option<Message> {
     match code {
         KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseOverlay),
-        KeyCode::Char('j') | KeyCode::Down => Some(Message::MoveDown),
-        KeyCode::Char('k') | KeyCode::Up => Some(Message::MoveUp),
+        KeyCode::Down => Some(Message::MoveDown),
+        KeyCode::Up => Some(Message::MoveUp),
         _ => None,
     }
 }

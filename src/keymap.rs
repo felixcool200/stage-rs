@@ -21,16 +21,16 @@ pub fn resolve(ctx: InputContext, key: KeyEvent) -> Option<Message> {
     // Shift+arrows: jump hunk-by-hunk in diff view
     if key.modifiers.contains(KeyModifiers::SHIFT) {
         match key.code {
-            KeyCode::Char('J') | KeyCode::Down => return Some(Message::NextHunk),
-            KeyCode::Char('K') | KeyCode::Up => return Some(Message::PrevHunk),
+            KeyCode::Down => return Some(Message::NextHunk),
+            KeyCode::Up => return Some(Message::PrevHunk),
             _ => {}
         }
     }
 
     match key.code {
         KeyCode::Char('q') => return Some(Message::Quit),
-        KeyCode::Char('j') | KeyCode::Down => return Some(Message::MoveDown),
-        KeyCode::Char('k') | KeyCode::Up => return Some(Message::MoveUp),
+        KeyCode::Down => return Some(Message::MoveDown),
+        KeyCode::Up => return Some(Message::MoveUp),
         KeyCode::Tab => return Some(Message::SwitchPanel),
         KeyCode::Char('r') => return Some(Message::Refresh),
         KeyCode::Char('c') => return Some(Message::OpenCommit),

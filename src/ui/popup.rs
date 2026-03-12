@@ -273,7 +273,7 @@ fn render_commit_detail(
     frame.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(format!(" {hash} - {message} [q/Esc to close, j/k to scroll] "))
+        .title(format!(" {hash} - {message} [q/Esc to close, ↑/↓ to scroll] "))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow));
 
@@ -313,7 +313,7 @@ fn render_rebase(
     frame.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(" Interactive Rebase [Space]cycle [J/K]reorder [Enter]execute [q]cancel ")
+        .title(" Interactive Rebase [Space]cycle [Shift+↑/↓]reorder [Enter]execute [q]cancel ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Magenta));
 

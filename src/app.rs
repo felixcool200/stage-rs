@@ -545,6 +545,8 @@ impl App {
                             self.status_message = Some(format!("Cannot read file: {e}"));
                         }
                     }
+                } else {
+                    self.status_message = Some("Select a file first (Enter on file list)".into());
                 }
             }
             Message::ExitEditMode => {

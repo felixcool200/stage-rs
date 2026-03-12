@@ -39,6 +39,10 @@ pub struct ConflictState {
     pub current_section: usize,
     /// Lines before first conflict
     pub prefix: Vec<String>,
+    /// Branch name from <<<<<<< marker (e.g. "HEAD" or "master")
+    pub left_name: String,
+    /// Branch name from >>>>>>> marker (e.g. "feature-branch")
+    pub right_name: String,
 }
 
 #[derive(Clone)]
@@ -626,14 +630,20 @@ impl App {
                         match std::fs::read_to_string(&full_path) {
                             Ok(content) => {
                                 match parse_conflicts(&content) {
-                                    Some((prefix, sections)) => {
+                                    Some(parsed) => {
+                                        let left = parsed.left_name.clone();
+                                        let right = parsed.right_name.clone();
                                         self.conflict_state = Some(ConflictState {
                                             file_path: path,
-                                            sections,
+                                            sections: parsed.sections,
                                             current_section: 0,
-                                            prefix,
+                                            prefix: parsed.prefix,
+                                            left_name: parsed.left_name,
+                                            right_name: parsed.right_name,
                                         });
-                                        self.status_message = Some("Conflict resolver: o=ours t=theirs b=both j/k=navigate s=save Esc=exit".into());
+                                        self.status_message = Some(format!(
+                                            "Conflict: ←={left}  →={right}  b=both  s=save  ↑/↓=navigate  Esc=exit"
+                                        ));
                                     }
                                     None => {
                                         self.status_message = Some("No conflict markers found".into());
@@ -650,13 +660,15 @@ impl App {
             Message::ConflictPickOurs => {
                 if let Some(cs) = &mut self.conflict_state {
                     cs.sections[cs.current_section].resolution = ConflictResolution::Ours;
-                    self.status_message = Some("Picked: ours".into());
+                    let name = &cs.left_name;
+                    self.status_message = Some(format!("Picked: {name}"));
                 }
             }
             Message::ConflictPickTheirs => {
                 if let Some(cs) = &mut self.conflict_state {
                     cs.sections[cs.current_section].resolution = ConflictResolution::Theirs;
-                    self.status_message = Some("Picked: theirs".into());
+                    let name = &cs.right_name;
+                    self.status_message = Some(format!("Picked: {name}"));
                 }
             }
             Message::ConflictPickBoth => {
@@ -1541,16 +1553,29 @@ impl App {
     }
 }
 
-fn parse_conflicts(content: &str) -> Option<(Vec<String>, Vec<ConflictSection>)> {
+struct ParsedConflicts {
+    prefix: Vec<String>,
+    sections: Vec<ConflictSection>,
+    left_name: String,
+    right_name: String,
+}
+
+fn parse_conflicts(content: &str) -> Option<ParsedConflicts> {
     let lines: Vec<&str> = content.lines().collect();
     let mut sections = Vec::new();
     let mut prefix = Vec::new();
     let mut i = 0;
     let mut in_prefix = true;
+    let mut left_name = String::new();
+    let mut right_name = String::new();
 
     while i < lines.len() {
         if lines[i].starts_with("<<<<<<<") {
             in_prefix = false;
+            // Extract left branch name from "<<<<<<< NAME"
+            if left_name.is_empty() {
+                left_name = lines[i].trim_start_matches('<').trim().to_string();
+            }
             let mut ours = Vec::new();
             i += 1;
             while i < lines.len() && !lines[i].starts_with("=======") {
@@ -1562,6 +1587,10 @@ fn parse_conflicts(content: &str) -> Option<(Vec<String>, Vec<ConflictSection>)>
             while i < lines.len() && !lines[i].starts_with(">>>>>>>") {
                 theirs.push(lines[i].to_string());
                 i += 1;
+            }
+            // Extract right branch name from ">>>>>>> NAME"
+            if i < lines.len() && right_name.is_empty() {
+                right_name = lines[i].trim_start_matches('>').trim().to_string();
             }
             i += 1; // skip >>>>>>>
             // Collect suffix lines until next conflict or end
@@ -1587,7 +1616,18 @@ fn parse_conflicts(content: &str) -> Option<(Vec<String>, Vec<ConflictSection>)>
     if sections.is_empty() {
         None
     } else {
-        Some((prefix, sections))
+        if left_name.is_empty() {
+            left_name = "left".to_string();
+        }
+        if right_name.is_empty() {
+            right_name = "right".to_string();
+        }
+        Some(ParsedConflicts {
+            prefix,
+            sections,
+            left_name,
+            right_name,
+        })
     }
 }
 
@@ -1821,13 +1861,15 @@ mod tests {
     #[test]
     fn test_parse_conflicts_single_conflict() {
         let content = "before\n<<<<<<< HEAD\nours line\n=======\ntheirs line\n>>>>>>> branch\nafter\n";
-        let (prefix, sections) = parse_conflicts(content).unwrap();
-        assert_eq!(prefix, vec!["before"]);
-        assert_eq!(sections.len(), 1);
-        assert_eq!(sections[0].ours, vec!["ours line"]);
-        assert_eq!(sections[0].theirs, vec!["theirs line"]);
-        assert_eq!(sections[0].resolution, ConflictResolution::Unresolved);
-        assert_eq!(sections[0].suffix, vec!["after"]);
+        let parsed = parse_conflicts(content).unwrap();
+        assert_eq!(parsed.prefix, vec!["before"]);
+        assert_eq!(parsed.sections.len(), 1);
+        assert_eq!(parsed.sections[0].ours, vec!["ours line"]);
+        assert_eq!(parsed.sections[0].theirs, vec!["theirs line"]);
+        assert_eq!(parsed.sections[0].resolution, ConflictResolution::Unresolved);
+        assert_eq!(parsed.sections[0].suffix, vec!["after"]);
+        assert_eq!(parsed.left_name, "HEAD");
+        assert_eq!(parsed.right_name, "branch");
     }
 
     #[test]
@@ -1838,40 +1880,42 @@ prefix line
 ours1
 =======
 theirs1
->>>>>>> branch
+>>>>>>> feature-branch
 middle
 <<<<<<< HEAD
 ours2
 =======
 theirs2
->>>>>>> branch
+>>>>>>> feature-branch
 end";
-        let (prefix, sections) = parse_conflicts(content).unwrap();
-        assert_eq!(prefix, vec!["prefix line"]);
-        assert_eq!(sections.len(), 2);
-        assert_eq!(sections[0].ours, vec!["ours1"]);
-        assert_eq!(sections[0].theirs, vec!["theirs1"]);
-        assert_eq!(sections[0].suffix, vec!["middle"]);
-        assert_eq!(sections[1].ours, vec!["ours2"]);
-        assert_eq!(sections[1].theirs, vec!["theirs2"]);
-        assert_eq!(sections[1].suffix, vec!["end"]);
+        let parsed = parse_conflicts(content).unwrap();
+        assert_eq!(parsed.prefix, vec!["prefix line"]);
+        assert_eq!(parsed.left_name, "HEAD");
+        assert_eq!(parsed.right_name, "feature-branch");
+        assert_eq!(parsed.sections.len(), 2);
+        assert_eq!(parsed.sections[0].ours, vec!["ours1"]);
+        assert_eq!(parsed.sections[0].theirs, vec!["theirs1"]);
+        assert_eq!(parsed.sections[0].suffix, vec!["middle"]);
+        assert_eq!(parsed.sections[1].ours, vec!["ours2"]);
+        assert_eq!(parsed.sections[1].theirs, vec!["theirs2"]);
+        assert_eq!(parsed.sections[1].suffix, vec!["end"]);
     }
 
     #[test]
     fn test_parse_conflicts_multi_line_sides() {
         let content = "<<<<<<< HEAD\nour line 1\nour line 2\n=======\ntheir line 1\ntheir line 2\ntheir line 3\n>>>>>>> branch\n";
-        let (prefix, sections) = parse_conflicts(content).unwrap();
-        assert!(prefix.is_empty());
-        assert_eq!(sections[0].ours, vec!["our line 1", "our line 2"]);
-        assert_eq!(sections[0].theirs, vec!["their line 1", "their line 2", "their line 3"]);
+        let parsed = parse_conflicts(content).unwrap();
+        assert!(parsed.prefix.is_empty());
+        assert_eq!(parsed.sections[0].ours, vec!["our line 1", "our line 2"]);
+        assert_eq!(parsed.sections[0].theirs, vec!["their line 1", "their line 2", "their line 3"]);
     }
 
     #[test]
     fn test_parse_conflicts_empty_sides() {
         let content = "<<<<<<< HEAD\n=======\ntheirs\n>>>>>>> branch\n";
-        let (_, sections) = parse_conflicts(content).unwrap();
-        assert!(sections[0].ours.is_empty());
-        assert_eq!(sections[0].theirs, vec!["theirs"]);
+        let parsed = parse_conflicts(content).unwrap();
+        assert!(parsed.sections[0].ours.is_empty());
+        assert_eq!(parsed.sections[0].theirs, vec!["theirs"]);
     }
 
     // ── Overlay ──

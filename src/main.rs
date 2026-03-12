@@ -99,12 +99,12 @@ fn poll_conflict_mode(app: &mut App) -> Result<Option<app::Message>> {
             app.status_message = Some("Conflict resolver closed".into());
             None
         }
-        (_, KeyCode::Char('o')) => Some(app::Message::ConflictPickOurs),
-        (_, KeyCode::Char('t')) => Some(app::Message::ConflictPickTheirs),
+        (_, KeyCode::Left) => Some(app::Message::ConflictPickOurs),
+        (_, KeyCode::Right) => Some(app::Message::ConflictPickTheirs),
         (_, KeyCode::Char('b')) => Some(app::Message::ConflictPickBoth),
         (_, KeyCode::Down) => Some(app::Message::ConflictNextSection),
         (_, KeyCode::Up) => Some(app::Message::ConflictPrevSection),
-        (_, KeyCode::Char('s')) => Some(app::Message::ConflictSave),
+        (_, KeyCode::Enter) => Some(app::Message::ConflictSave),
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(app::Message::Quit),
         _ => None,
     })

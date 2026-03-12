@@ -293,67 +293,114 @@ fn get_line_highlight(
 }
 
 fn render_conflict(frame: &mut Frame, cs: &ConflictState, area: Rect) {
-    let block = Block::default()
-        .title(format!(
-            " Conflict: {} [{}/{}] o=ours t=theirs b=both s=save ",
-            cs.file_path,
-            cs.current_section + 1,
-            cs.sections.len()
+    let section = &cs.sections[cs.current_section];
+
+    let (res_label, res_color) = match section.resolution {
+        ConflictResolution::Unresolved => ("UNRESOLVED", Color::Red),
+        ConflictResolution::Ours => (&*cs.left_name, Color::Cyan),
+        ConflictResolution::Theirs => (&*cs.right_name, Color::Magenta),
+        ConflictResolution::Both => ("BOTH", Color::Green),
+    };
+
+    // Top status bar
+    let top_line = Line::from(vec![
+        Span::styled(
+            format!(" {} ", cs.file_path),
+            Style::default().fg(Color::White).bg(Color::DarkGray),
+        ),
+        Span::styled(
+            format!(" {}/{} ", cs.current_section + 1, cs.sections.len()),
+            Style::default().fg(Color::Yellow),
+        ),
+        Span::styled(
+            format!(" {res_label} "),
+            Style::default()
+                .fg(Color::Black)
+                .bg(res_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  ←:{}  →:{}  b:both  Enter:save  Esc:exit ", cs.left_name, cs.right_name),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]);
+    let status_area = Rect { height: 1, ..area };
+    frame.render_widget(Paragraph::new(top_line), status_area);
+
+    // Side-by-side panels below status
+    let panels_area = Rect {
+        y: area.y + 1,
+        height: area.height.saturating_sub(1),
+        ..area
+    };
+    let halves = Layout::horizontal([
+        Constraint::Percentage(50),
+        Constraint::Percentage(50),
+    ]).split(panels_area);
+
+    let left_selected = matches!(section.resolution, ConflictResolution::Ours | ConflictResolution::Both);
+    let right_selected = matches!(section.resolution, ConflictResolution::Theirs | ConflictResolution::Both);
+
+    let left_border_color = if left_selected { Color::Cyan } else { Color::DarkGray };
+    let right_border_color = if right_selected { Color::Magenta } else { Color::DarkGray };
+
+    // Left panel (ours / left branch)
+    let left_block = Block::default()
+        .title(Span::styled(
+            format!(" {} ", cs.left_name),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red));
+        .border_style(Style::default().fg(left_border_color));
 
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let left_inner = left_block.inner(halves[0]);
+    frame.render_widget(left_block, halves[0]);
 
-    let section = &cs.sections[cs.current_section];
-    let resolution_label = match section.resolution {
-        ConflictResolution::Unresolved => "UNRESOLVED",
-        ConflictResolution::Ours => "OURS",
-        ConflictResolution::Theirs => "THEIRS",
-        ConflictResolution::Both => "BOTH",
+    let left_bg = if left_selected {
+        Color::Rgb(10, 40, 50)
+    } else {
+        Color::Reset
     };
-    let res_color = match section.resolution {
-        ConflictResolution::Unresolved => Color::Red,
-        ConflictResolution::Ours => Color::Cyan,
-        ConflictResolution::Theirs => Color::Magenta,
-        ConflictResolution::Both => Color::Green,
+    let left_lines: Vec<Line> = section
+        .ours
+        .iter()
+        .map(|l| {
+            Line::from(Span::styled(
+                format!(" {l}"),
+                Style::default().fg(Color::Cyan).bg(left_bg),
+            ))
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(left_lines), left_inner);
+
+    // Right panel (theirs / right branch)
+    let right_block = Block::default()
+        .title(Span::styled(
+            format!(" {} ", cs.right_name),
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(right_border_color));
+
+    let right_inner = right_block.inner(halves[1]);
+    frame.render_widget(right_block, halves[1]);
+
+    let right_bg = if right_selected {
+        Color::Rgb(40, 10, 50)
+    } else {
+        Color::Reset
     };
-
-    let mut lines = vec![
-        Line::from(Span::styled(
-            format!("  Resolution: {resolution_label}"),
-            Style::default().fg(res_color).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  <<<<<<< OURS",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        )),
-    ];
-    for l in &section.ours {
-        lines.push(Line::from(Span::styled(
-            format!("  {l}"),
-            Style::default().fg(Color::Cyan),
-        )));
-    }
-    lines.push(Line::from(Span::styled(
-        "  =======",
-        Style::default().fg(Color::DarkGray),
-    )));
-    lines.push(Line::from(Span::styled(
-        "  >>>>>>> THEIRS",
-        Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-    )));
-    for l in &section.theirs {
-        lines.push(Line::from(Span::styled(
-            format!("  {l}"),
-            Style::default().fg(Color::Magenta),
-        )));
-    }
-
-    let paragraph = Paragraph::new(lines);
-    frame.render_widget(paragraph, inner);
+    let right_lines: Vec<Line> = section
+        .theirs
+        .iter()
+        .map(|l| {
+            Line::from(Span::styled(
+                format!(" {l}"),
+                Style::default().fg(Color::Magenta).bg(right_bg),
+            ))
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(right_lines), right_inner);
 }
 
 /// Push syntax-highlighted spans for a line's content, falling back to a single styled span.

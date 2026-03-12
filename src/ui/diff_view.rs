@@ -49,12 +49,19 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
 
             // Show selection indicator in line mode
             if ds.view_mode == DiffViewMode::LineNav && dl.hunk_index.is_some() {
-                let marker = if ds.selected_lines.contains(&i) {
+                let is_selected = ds.selected_lines.contains(&i);
+                let is_cursor = i == ds.cursor_line;
+                let marker = if is_selected && is_cursor {
+                    Span::styled(
+                        "[x]",
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    )
+                } else if is_selected {
                     Span::styled(
                         "[x]",
                         Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
                     )
-                } else if i == ds.cursor_line {
+                } else if is_cursor {
                     Span::styled(
                         "[ ]",
                         Style::default().fg(Color::Yellow),
@@ -157,12 +164,19 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
             let mut spans = Vec::new();
             // Show selection indicator in line mode
             if ds.view_mode == DiffViewMode::LineNav && dl.hunk_index.is_some() {
-                let marker = if ds.selected_lines.contains(&i) {
+                let is_selected = ds.selected_lines.contains(&i);
+                let is_cursor = i == ds.cursor_line;
+                let marker = if is_selected && is_cursor {
+                    Span::styled(
+                        "[x]",
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    )
+                } else if is_selected {
                     Span::styled(
                         "[x]",
                         Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
                     )
-                } else if i == ds.cursor_line {
+                } else if is_cursor {
                     Span::styled(
                         "[ ]",
                         Style::default().fg(Color::Yellow),

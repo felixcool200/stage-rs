@@ -137,6 +137,8 @@ pub enum Overlay {
         message: String,
         diff_lines: Vec<String>,
         scroll: usize,
+        log_entries: Vec<LogEntry>,
+        log_selected: usize,
     },
     Rebase {
         entries: Vec<RebaseEntry>,
@@ -391,6 +393,8 @@ pub enum Message {
     UndoLastCommit,
     OpenGitLog,
     ViewCommitDetail,
+    PrevCommitDetail,
+    NextCommitDetail,
     // Interactive rebase
     StartRebase,
     RebaseCycleAction,
@@ -568,7 +572,13 @@ impl App {
                 }
             }
             Message::CloseOverlay => {
-                self.overlay = Overlay::None;
+                if let Overlay::CommitDetail { log_entries, log_selected, .. } = std::mem::replace(&mut self.overlay, Overlay::None) {
+                    self.overlay = Overlay::GitLog {
+                        entries: log_entries,
+                        selected: log_selected,
+                        scroll: 0,
+                    };
+                }
             }
             Message::MoveUp => self.handle_move_up()?,
             Message::MoveDown => self.handle_move_down()?,
@@ -1320,22 +1330,65 @@ impl App {
             }
             Message::ViewCommitDetail => {
                 if let Overlay::GitLog { entries, selected, .. } = &self.overlay {
-                    if let Some(entry) = entries.get(*selected) {
+                    let selected = *selected;
+                    if let Some(entry) = entries.get(selected) {
                         let hash = entry.hash.clone();
                         let message = entry.message.clone();
                         match self.repo.get_commit_diff(&hash) {
                             Ok(diff_text) => {
                                 let diff_lines: Vec<String> = diff_text.lines().map(String::from).collect();
+                                // Take log entries out of GitLog overlay
+                                let log_entries = if let Overlay::GitLog { entries, .. } = std::mem::replace(&mut self.overlay, Overlay::None) {
+                                    entries
+                                } else {
+                                    unreachable!()
+                                };
                                 self.overlay = Overlay::CommitDetail {
                                     hash,
                                     message,
                                     diff_lines,
                                     scroll: 0,
+                                    log_entries,
+                                    log_selected: selected,
                                 };
                             }
                             Err(e) => {
                                 self.status_message = Some(format!("Diff failed: {e}"));
                             }
+                        }
+                    }
+                }
+            }
+            Message::PrevCommitDetail | Message::NextCommitDetail => {
+                if let Overlay::CommitDetail { ref log_entries, log_selected, .. } = self.overlay {
+                    let new_idx = if matches!(msg, Message::PrevCommitDetail) {
+                        if log_selected == 0 { return Ok(()); } else { log_selected - 1 }
+                    } else if log_selected + 1 >= log_entries.len() {
+                        return Ok(());
+                    } else {
+                        log_selected + 1
+                    };
+                    let hash = log_entries[new_idx].hash.clone();
+                    let message = log_entries[new_idx].message.clone();
+                    match self.repo.get_commit_diff(&hash) {
+                        Ok(diff_text) => {
+                            let diff_lines: Vec<String> = diff_text.lines().map(String::from).collect();
+                            let log_entries = if let Overlay::CommitDetail { log_entries, .. } = std::mem::replace(&mut self.overlay, Overlay::None) {
+                                log_entries
+                            } else {
+                                unreachable!()
+                            };
+                            self.overlay = Overlay::CommitDetail {
+                                hash,
+                                message,
+                                diff_lines,
+                                scroll: 0,
+                                log_entries,
+                                log_selected: new_idx,
+                            };
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Diff failed: {e}"));
                         }
                     }
                 }

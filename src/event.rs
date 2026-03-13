@@ -38,7 +38,7 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
             Overlay::GitLog { .. } => handle_git_log(key.code),
             Overlay::StashList { .. } => handle_stash_list(key.code),
             Overlay::BranchList { .. } => handle_branch_list(key.code),
-            Overlay::CommitDetail { .. } => handle_commit_detail(key.code),
+            Overlay::CommitDetail { .. } => handle_commit_detail(key.code, key.modifiers),
             Overlay::Rebase { .. } => handle_rebase(key.code, key.modifiers),
             Overlay::DirtyCheckout { has_conflicts, .. } => handle_dirty_checkout(key.code, *has_conflicts),
             Overlay::None => unreachable!(),
@@ -148,11 +148,13 @@ fn handle_dirty_checkout(code: KeyCode, has_conflicts: bool) -> Option<Message> 
     }
 }
 
-fn handle_commit_detail(code: KeyCode) -> Option<Message> {
-    match code {
-        KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseOverlay),
-        KeyCode::Down => Some(Message::MoveDown),
-        KeyCode::Up => Some(Message::MoveUp),
+fn handle_commit_detail(code: KeyCode, modifiers: KeyModifiers) -> Option<Message> {
+    match (modifiers, code) {
+        (_, KeyCode::Esc) | (_, KeyCode::Char('q')) => Some(Message::CloseOverlay),
+        (KeyModifiers::SHIFT, KeyCode::Down) => Some(Message::NextCommitDetail),
+        (KeyModifiers::SHIFT, KeyCode::Up) => Some(Message::PrevCommitDetail),
+        (_, KeyCode::Down) => Some(Message::MoveDown),
+        (_, KeyCode::Up) => Some(Message::MoveUp),
         _ => None,
     }
 }

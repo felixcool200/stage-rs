@@ -7,9 +7,26 @@ pub struct LogEntry {
     pub author: String,
     pub date: String,
     pub message: String,
+    pub refs: Vec<String>,
 }
 
 pub fn get_log(repo: &Repository, max_count: usize) -> Result<Vec<LogEntry>> {
+    // Build a map of commit OID -> ref names (branches and tags)
+    let mut ref_map: std::collections::HashMap<git2::Oid, Vec<String>> = std::collections::HashMap::new();
+    if let Ok(refs) = repo.references() {
+        for reference in refs.flatten() {
+            let name = if let Some(shorthand) = reference.shorthand() {
+                shorthand.to_string()
+            } else {
+                continue;
+            };
+            // Resolve to the commit OID (handles annotated tags too)
+            if let Ok(target) = reference.peel_to_commit() {
+                ref_map.entry(target.id()).or_default().push(name);
+            }
+        }
+    }
+
     let mut revwalk = repo.revwalk()?;
     revwalk.push_head()?;
     revwalk.set_sorting(git2::Sort::TIME)?;
@@ -19,7 +36,6 @@ pub fn get_log(repo: &Repository, max_count: usize) -> Result<Vec<LogEntry>> {
         let commit = repo.find_commit(oid)?;
         let time = commit.time();
         let secs = time.seconds();
-        // Format as YYYY-MM-DD HH:MM
         let date = format_timestamp(secs);
 
         entries.push(LogEntry {
@@ -34,6 +50,7 @@ pub fn get_log(repo: &Repository, max_count: usize) -> Result<Vec<LogEntry>> {
                 .summary()
                 .unwrap_or("")
                 .to_string(),
+            refs: ref_map.remove(&oid).unwrap_or_default(),
         });
     }
 

@@ -36,8 +36,9 @@ pub fn render(app: &App, frame: &mut Frame) {
         Overlay::BranchList { entries, selected, creating } => {
             render_branch_list(frame, entries, *selected, creating.as_deref(), theme);
         }
-        Overlay::CommitDetail { hash, message, diff_lines, scroll } => {
-            render_commit_detail(frame, hash, message, diff_lines, *scroll, theme);
+        Overlay::CommitDetail { hash, message, diff_lines, scroll, log_entries, log_selected } => {
+            let refs = &log_entries[*log_selected].refs;
+            render_commit_detail(frame, hash, message, diff_lines, *scroll, *log_selected, log_entries.len(), refs, theme);
         }
         Overlay::Rebase { entries, selected, .. } => {
             render_rebase(frame, entries, *selected, theme);
@@ -227,7 +228,7 @@ fn render_git_log(
     let items: Vec<ListItem> = entries
         .iter()
         .map(|e| {
-            ListItem::new(Line::from(vec![
+            let mut spans = vec![
                 Span::styled(
                     format!("{} ", e.hash),
                     Style::default()
@@ -242,8 +243,15 @@ fn render_git_log(
                     format!("{} ", e.author),
                     Style::default().fg(theme.green),
                 ),
-                Span::styled(&e.message, Style::default().fg(theme.fg)),
-            ]))
+            ];
+            for r in &e.refs {
+                spans.push(Span::styled(
+                    format!("({r}) "),
+                    Style::default().fg(theme.cyan).add_modifier(Modifier::BOLD),
+                ));
+            }
+            spans.push(Span::styled(&e.message, Style::default().fg(theme.fg)));
+            ListItem::new(Line::from(spans))
         })
         .collect();
 
@@ -332,19 +340,37 @@ fn render_branch_list(
     frame.render_stateful_widget(list, inner, &mut state);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_commit_detail(
     frame: &mut Frame,
     hash: &str,
     message: &str,
     diff_lines: &[String],
     scroll: usize,
+    log_index: usize,
+    log_total: usize,
+    refs: &[String],
     theme: &Theme,
 ) {
     let area = centered_rect(85, 80, frame.area());
     frame.render_widget(Clear, area);
 
+    let refs_str = if refs.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", refs.join(", "))
+    };
+
     let block = Block::default()
-        .title(format!(" {hash} - {message} [q/Esc to close, ↑/↓ to scroll] "))
+        .title(format!(" [{}/{}] {hash}{refs_str} - {message} ", log_index + 1, log_total))
+        .title_bottom(Line::from(vec![
+            Span::styled(" Shift+↑/↓", Style::default().fg(theme.yellow)),
+            Span::styled(":prev/next  ", Style::default().fg(theme.fg_dim)),
+            Span::styled("↑/↓", Style::default().fg(theme.yellow)),
+            Span::styled(":scroll  ", Style::default().fg(theme.fg_dim)),
+            Span::styled("q/Esc", Style::default().fg(theme.yellow)),
+            Span::styled(":close ", Style::default().fg(theme.fg_dim)),
+        ]))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.yellow))
         .style(Style::default().bg(theme.bg));

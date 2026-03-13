@@ -1,6 +1,7 @@
 use ratatui::style::Color;
 
 pub struct Theme {
+    pub name: &'static str,
     // Base palette
     pub fg: Color,
     pub fg_dim: Color,
@@ -38,9 +39,24 @@ pub struct Theme {
     pub syntax_theme: String,
 }
 
+pub const THEME_NAMES: &[&str] = &["default", "dracula"];
+
 impl Theme {
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "dracula" => Self::dracula(),
+            _ => Self::default_theme(),
+        }
+    }
+
+    pub fn next_theme_name(current: &str) -> &'static str {
+        let idx = THEME_NAMES.iter().position(|&n| n == current).unwrap_or(0);
+        THEME_NAMES[(idx + 1) % THEME_NAMES.len()]
+    }
+
     pub fn default_theme() -> Self {
         Self {
+            name: "default",
             fg: Color::White,
             fg_dim: Color::DarkGray,
             bg: Color::Reset,
@@ -77,6 +93,7 @@ impl Theme {
 
     pub fn dracula() -> Self {
         Self {
+            name: "dracula",
             fg: Color::Rgb(248, 248, 242),
             fg_dim: Color::Rgb(98, 114, 164),
             bg: Color::Rgb(40, 42, 54),

@@ -13,7 +13,8 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
     let block = Block::default()
         .title(" Index / HEAD ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.fg_dim));
+        .border_style(Style::default().fg(theme.fg_dim))
+        .style(Style::default().bg(theme.bg));
 
     let Some(ds) = &app.diff_state else {
         let placeholder = Paragraph::new("Select a file to view diff").block(block);
@@ -126,7 +127,8 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(theme.bg));
 
     let Some(ds) = &app.diff_state else {
         frame.render_widget(Paragraph::new("").block(block), area);
@@ -355,7 +357,8 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
             Style::default().fg(left_title_fg).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(left_border));
+        .border_style(Style::default().fg(left_border))
+        .style(Style::default().bg(left_bg));
 
     let left_inner = left_block.inner(halves[0]);
     frame.render_widget(left_block, halves[0]);
@@ -406,7 +409,8 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
             Style::default().fg(right_title_fg).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(right_border));
+        .border_style(Style::default().fg(right_border))
+        .style(Style::default().bg(right_bg));
 
     let right_inner = right_block.inner(halves[1]);
     frame.render_widget(right_block, halves[1]);

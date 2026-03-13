@@ -55,7 +55,8 @@ fn render_confirm(frame: &mut Frame, message: &str, theme: &Theme) {
     let block = Block::default()
         .title(" Confirm ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.red));
+        .border_style(Style::default().fg(theme.red))
+        .style(Style::default().bg(theme.bg));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -86,7 +87,8 @@ fn render_dirty_checkout(frame: &mut Frame, branch: &str, has_conflicts: bool, t
     let block = Block::default()
         .title(" Uncommitted Changes ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.yellow));
+        .border_style(Style::default().fg(theme.yellow))
+        .style(Style::default().bg(theme.bg));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -147,7 +149,8 @@ fn render_commit_input(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.yellow));
+        .border_style(Style::default().fg(theme.yellow))
+        .style(Style::default().bg(theme.bg));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -218,7 +221,8 @@ fn render_git_log(
             Span::styled(":close ", Style::default().fg(theme.fg_dim)),
         ]))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.cyan));
+        .border_style(Style::default().fg(theme.cyan))
+        .style(Style::default().bg(theme.bg));
 
     let items: Vec<ListItem> = entries
         .iter()
@@ -275,7 +279,8 @@ fn render_branch_list(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.green));
+        .border_style(Style::default().fg(theme.green))
+        .style(Style::default().bg(theme.bg));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -341,7 +346,8 @@ fn render_commit_detail(
     let block = Block::default()
         .title(format!(" {hash} - {message} [q/Esc to close, ↑/↓ to scroll] "))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.yellow));
+        .border_style(Style::default().fg(theme.yellow))
+        .style(Style::default().bg(theme.bg));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -381,7 +387,8 @@ fn render_rebase(
     let block = Block::default()
         .title(" Interactive Rebase [Space]cycle [Shift+↑/↓]reorder [Enter]execute [q]cancel ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.magenta));
+        .border_style(Style::default().fg(theme.magenta))
+        .style(Style::default().bg(theme.bg));
 
     let items: Vec<ListItem> = entries
         .iter()
@@ -433,7 +440,8 @@ fn render_stash_list(
             entries.len()
         ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.magenta));
+        .border_style(Style::default().fg(theme.magenta))
+        .style(Style::default().bg(theme.bg));
 
     let items: Vec<ListItem> = entries
         .iter()
@@ -481,7 +489,8 @@ fn render_which_key(frame: &mut Frame, entries: &[WhichKeyEntry], theme: &Theme)
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.fg_dim));
+        .border_style(Style::default().fg(theme.fg_dim))
+        .style(Style::default().bg(theme.bg));
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 

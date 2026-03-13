@@ -41,7 +41,7 @@ pub fn render_header(app: &App, frame: &mut Frame, area: Rect) {
         ),
     ]);
 
-    frame.render_widget(Paragraph::new(line), area);
+    frame.render_widget(Paragraph::new(line).style(Style::default().bg(app.theme.bg)), area);
 }
 
 pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
@@ -113,5 +113,5 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         Style::default().fg(app.theme.fg_dim),
     ));
 
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    frame.render_widget(Paragraph::new(Line::from(spans)).style(Style::default().bg(app.theme.bg)), area);
 }

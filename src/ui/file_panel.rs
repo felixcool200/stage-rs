@@ -24,7 +24,8 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(app.theme.bg));
 
     // Reserve a line at the bottom for filter input when filtering
     let (list_area, filter_area) = if filtering {

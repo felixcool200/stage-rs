@@ -401,6 +401,8 @@ pub enum Message {
     RebaseAbort,
     // Which-key
     OpenWhichKey,
+    // Theme
+    CycleTheme,
     // Conflict resolver
     CloseConflict,
     // Overlay actions (handled by overlay key routing, not keymap)
@@ -423,11 +425,12 @@ impl App {
         let theme = Theme::from_env();
         let highlighter = Highlighter::new(&theme.syntax_theme);
 
+        let no_files = file_entries.is_empty();
         let mut app = Self {
             repo,
             file_entries,
             selected_index: 0,
-            header_selected: false,
+            header_selected: no_files,
             active_panel: Panel::FileList,
             diff_state: None,
             branch_name,
@@ -542,6 +545,7 @@ impl App {
                 entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
             }
         }
+        entries.push(WhichKeyEntry { key: 'T', label: "next theme", message: CycleTheme });
         entries
     }
 
@@ -549,6 +553,12 @@ impl App {
         match msg {
             Message::OpenWhichKey => {
                 self.which_key = Some(self.build_which_key_entries());
+            }
+            Message::CycleTheme => {
+                let next = Theme::next_theme_name(self.theme.name);
+                self.theme = Theme::from_name(next);
+                self.highlighter = Highlighter::new(&self.theme.syntax_theme);
+                self.status_message = Some(format!("Theme: {next}"));
             }
             Message::Quit => {
                 if self.overlay.is_active() {
@@ -1632,8 +1642,10 @@ impl App {
         self.file_entries = self.repo.get_file_statuses()?;
         self.branch_name = self.repo.branch_name();
         self.ahead_behind = self.repo.ahead_behind();
-        if !self.header_selected && self.selected_index >= self.file_entries.len() {
-            self.selected_index = self.file_entries.len().saturating_sub(1);
+        if !self.header_selected && self.file_entries.is_empty() {
+            self.header_selected = true;
+        } else if !self.header_selected && self.selected_index >= self.file_entries.len() {
+            self.selected_index = self.file_entries.len() - 1;
         }
         Ok(())
     }

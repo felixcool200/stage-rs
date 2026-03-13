@@ -5,12 +5,15 @@ mod status_bar;
 
 use crate::app::App;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::widgets::Clear;
+use ratatui::style::Style;
+use ratatui::widgets::{Block, Clear};
 use ratatui::Frame;
 
 pub fn render(app: &App, frame: &mut Frame) {
     // Clear entire frame to avoid stale overlay artifacts
     frame.render_widget(Clear, frame.area());
+    // Fill background with theme color
+    frame.render_widget(Block::default().style(Style::default().bg(app.theme.bg)), frame.area());
     let [header, body, footer] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Fill(1),

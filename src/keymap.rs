@@ -21,8 +21,6 @@ pub fn resolve(ctx: InputContext, key: KeyEvent) -> Option<Message> {
 
     // Global navigation
     match key.code {
-        KeyCode::Char('q') => return Some(Message::Quit),
-        KeyCode::Tab => return Some(Message::SwitchPanel),
         KeyCode::Char(' ') => return Some(Message::OpenWhichKey),
         _ => {}
     }
@@ -30,6 +28,7 @@ pub fn resolve(ctx: InputContext, key: KeyEvent) -> Option<Message> {
     // Context-specific navigation
     match ctx {
         InputContext::FileList => match key.code {
+            KeyCode::Char('q') => Some(Message::Quit),
             KeyCode::Down => Some(Message::MoveDown),
             KeyCode::Up => Some(Message::MoveUp),
             KeyCode::Enter | KeyCode::Right => Some(Message::SwitchPanel),
@@ -37,6 +36,7 @@ pub fn resolve(ctx: InputContext, key: KeyEvent) -> Option<Message> {
             _ => None,
         },
         InputContext::DiffHunkNav => match (key.modifiers, key.code) {
+            (_, KeyCode::Char('q')) => Some(Message::Quit),
             (KeyModifiers::SHIFT, KeyCode::Down) => Some(Message::MoveDown),
             (KeyModifiers::SHIFT, KeyCode::Up) => Some(Message::MoveUp),
             (_, KeyCode::Down) => Some(Message::NextHunk),
@@ -51,13 +51,15 @@ pub fn resolve(ctx: InputContext, key: KeyEvent) -> Option<Message> {
             (_, KeyCode::Down) => Some(Message::MoveDown),
             (_, KeyCode::Up) => Some(Message::MoveUp),
             (_, KeyCode::Enter) | (_, KeyCode::Right) => Some(Message::ToggleLine),
-            (_, KeyCode::Esc) | (_, KeyCode::Left) => Some(Message::ExitLineMode),
+            (_, KeyCode::Esc) | (_, KeyCode::Left) | (_, KeyCode::Char('q')) => {
+                Some(Message::ExitLineMode)
+            }
             _ => None,
         },
         InputContext::ConflictNav => match key.code {
             KeyCode::Down => Some(Message::MoveDown),
             KeyCode::Up => Some(Message::MoveUp),
-            KeyCode::Left | KeyCode::Esc => Some(Message::CloseConflict),
+            KeyCode::Left | KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseConflict),
             _ => None,
         },
     }
@@ -86,11 +88,22 @@ mod tests {
     }
 
     #[test]
-    fn test_q_quits_in_all_contexts() {
+    fn test_q_quits_in_filelist_and_hunknav() {
         let q = key(KeyCode::Char('q'));
         assert!(matches!(resolve(InputContext::FileList, q), Some(Message::Quit)));
         assert!(matches!(resolve(InputContext::DiffHunkNav, q), Some(Message::Quit)));
-        assert!(matches!(resolve(InputContext::DiffLineNav, q), Some(Message::Quit)));
+    }
+
+    #[test]
+    fn test_q_exits_line_mode() {
+        let q = key(KeyCode::Char('q'));
+        assert!(matches!(resolve(InputContext::DiffLineNav, q), Some(Message::ExitLineMode)));
+    }
+
+    #[test]
+    fn test_q_closes_conflict() {
+        let q = key(KeyCode::Char('q'));
+        assert!(matches!(resolve(InputContext::ConflictNav, q), Some(Message::CloseConflict)));
     }
 
     #[test]
@@ -104,9 +117,9 @@ mod tests {
     }
 
     #[test]
-    fn test_tab_switches_panel() {
-        assert!(matches!(resolve(InputContext::FileList, key(KeyCode::Tab)), Some(Message::SwitchPanel)));
-        assert!(matches!(resolve(InputContext::DiffHunkNav, key(KeyCode::Tab)), Some(Message::SwitchPanel)));
+    fn test_tab_is_not_bound() {
+        assert!(resolve(InputContext::FileList, key(KeyCode::Tab)).is_none());
+        assert!(resolve(InputContext::DiffHunkNav, key(KeyCode::Tab)).is_none());
     }
 
     #[test]

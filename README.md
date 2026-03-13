@@ -37,10 +37,12 @@ stage-rs /path/to/repo
 | Key | Action |
 |-----|--------|
 | `↑`/`↓` | Navigate files / hunks / lines |
-| `Tab`/`Enter` | Switch between file list and diff view |
+| `→`/`Enter` | Drill in: file list → diff → line mode |
+| `←` | Back out: line mode → diff → file list |
 | `Space` | Open actions menu |
 | `/` | Filter file list |
-| `q` / `Ctrl+C` | Quit |
+| `q` | Quit (or back out of line mode / overlays) |
+| `Ctrl+C` | Quit |
 
 ## License
 

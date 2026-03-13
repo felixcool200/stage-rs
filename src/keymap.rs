@@ -12,17 +12,12 @@ pub enum InputContext {
 
 /// Resolve a key event to a message given the current context.
 pub fn resolve(ctx: InputContext, key: KeyEvent) -> Option<Message> {
-    if key.modifiers == KeyModifiers::CONTROL {
-        match key.code {
-            KeyCode::Char('c') => return Some(Message::Quit),
-            _ => {}
-        }
+    if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('c') {
+        return Some(Message::Quit);
     }
 
-    // Global navigation
-    match key.code {
-        KeyCode::Char(' ') => return Some(Message::OpenWhichKey),
-        _ => {}
+    if key.code == KeyCode::Char(' ') {
+        return Some(Message::OpenWhichKey);
     }
 
     // Context-specific navigation

@@ -158,7 +158,7 @@ fn render_commit_input(
 
     // Build styled lines for text input
     let mut lines: Vec<Line> = Vec::new();
-    for (_row, line_text) in input.lines.iter().enumerate() {
+    for line_text in input.lines.iter() {
         let display = if line_text.is_empty() { " " } else { line_text.as_str() };
         lines.push(Line::from(Span::styled(
             display,
@@ -457,7 +457,7 @@ fn render_stash_list(
 
 fn render_which_key(frame: &mut Frame, entries: &[WhichKeyEntry]) {
     let cols = 3;
-    let rows = (entries.len() + cols - 1) / cols;
+    let rows = entries.len().div_ceil(cols);
     let popup_height = rows as u16 + 2; // +2 for borders
     let area = frame.area();
 

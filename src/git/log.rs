@@ -59,11 +59,7 @@ pub fn get_commit_diff(repo: &Repository, hash: &str) -> Result<String> {
             'F' => "--- ",
             _ => " ",
         };
-        if line.origin() == 'H' || line.origin() == 'F' {
-            output.push_str(prefix);
-        } else {
-            output.push_str(prefix);
-        }
+        output.push_str(prefix);
         output.push_str(&String::from_utf8_lossy(line.content()));
         true
     })?;

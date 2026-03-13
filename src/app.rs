@@ -285,12 +285,14 @@ impl TextInput {
         self.cursor_col = self.lines[self.cursor_row].chars().count();
     }
 
-    pub fn to_string(&self) -> String {
-        self.lines.join("\n")
-    }
-
     pub fn is_empty(&self) -> bool {
         self.lines.iter().all(|l| l.trim().is_empty())
+    }
+}
+
+impl std::fmt::Display for TextInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.lines.join("\n"))
     }
 }
 
@@ -599,7 +601,7 @@ impl App {
                     let path = entry.path.clone();
                     // In diff view with hunks available, confirm before staging entire file
                     let in_diff_partial = self.active_panel == Panel::DiffView
-                        && self.diff_state.as_ref().map_or(false, |ds| !ds.hunks.is_empty());
+                        && self.diff_state.as_ref().is_some_and(|ds| !ds.hunks.is_empty());
                     if in_diff_partial {
                         self.overlay = Overlay::Confirm {
                             message: format!("Stage entire file '{path}'? (Use 's' to stage current hunk)"),
@@ -922,21 +924,19 @@ impl App {
                 }
             }
             Message::ConfirmCreateBranch => {
-                if let Overlay::BranchList { creating, .. } = &self.overlay {
-                    if let Some(name) = creating {
-                        let name = name.clone();
-                        if name.is_empty() {
-                            self.status_message = Some("Branch name cannot be empty".into());
-                        } else {
-                            self.overlay = Overlay::None;
-                            match self.repo.create_branch(&name) {
-                                Ok(()) => {
-                                    self.status_message = Some(format!("Created and switched to {name}"));
-                                    self.refresh()?;
-                                }
-                                Err(e) => {
-                                    self.status_message = Some(format!("Create branch failed: {e}"));
-                                }
+                if let Overlay::BranchList { creating: Some(name), .. } = &self.overlay {
+                    let name = name.clone();
+                    if name.is_empty() {
+                        self.status_message = Some("Branch name cannot be empty".into());
+                    } else {
+                        self.overlay = Overlay::None;
+                        match self.repo.create_branch(&name) {
+                            Ok(()) => {
+                                self.status_message = Some(format!("Created and switched to {name}"));
+                                self.refresh()?;
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Create branch failed: {e}"));
                             }
                         }
                     }

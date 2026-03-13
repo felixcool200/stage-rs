@@ -86,7 +86,7 @@ fn handle_commit_input(modifiers: KeyModifiers, code: KeyCode) -> Option<Message
 fn handle_confirm(code: KeyCode) -> Option<Message> {
     match code {
         KeyCode::Char('y') | KeyCode::Enter => Some(Message::ConfirmAction),
-        KeyCode::Char('n') | KeyCode::Esc => Some(Message::CloseOverlay),
+        KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q') => Some(Message::CloseOverlay),
         _ => None,
     }
 }

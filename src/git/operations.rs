@@ -273,21 +273,6 @@ pub fn create_branch(repo: &Repository, name: &str) -> Result<()> {
 
 // ── Remote Operations ────────────────────────────────────────────────────────
 
-pub fn git_fetch(workdir: &Path) -> Result<String> {
-    let output = std::process::Command::new("git")
-        .args(["fetch", "--all"])
-        .current_dir(workdir)
-        .output()
-        .map_err(|e| eyre!("Failed to run git fetch: {e}"))?;
-    if output.status.success() {
-        let msg = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Ok(if msg.is_empty() { "Fetched successfully".into() } else { msg })
-    } else {
-        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(eyre!("{err}"))
-    }
-}
-
 pub fn git_rebase_continue(workdir: &Path) -> Result<String> {
     let output = std::process::Command::new("git")
         .args(["rebase", "--continue"])

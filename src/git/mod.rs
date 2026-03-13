@@ -144,10 +144,6 @@ impl GitRepo {
         operations::git_rebase_abort(self.workdir())
     }
 
-    pub fn fetch(&self) -> Result<String> {
-        operations::git_fetch(self.workdir())
-    }
-
     /// Returns (ahead, behind) relative to the upstream tracking branch.
     /// Returns (0, 0) if no upstream is configured.
     pub fn ahead_behind(&self) -> (usize, usize) {

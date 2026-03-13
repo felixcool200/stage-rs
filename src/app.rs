@@ -28,6 +28,8 @@ pub struct App {
     pub show_blame: bool,
     /// Pending request to open $EDITOR
     pub pending_editor: Option<EditorRequest>,
+    /// Pending shell command that needs terminal access (e.g. git fetch with SSH)
+    pub pending_terminal_cmd: Option<TerminalCmd>,
     /// Which-key popup entries (None = popup closed)
     pub which_key: Option<Vec<WhichKeyEntry>>,
     /// Conflict resolver state
@@ -70,6 +72,13 @@ pub enum ConflictResolution {
 pub struct EditorRequest {
     pub file_path: String,
     pub line_number: usize,
+}
+
+pub struct TerminalCmd {
+    pub program: String,
+    pub args: Vec<String>,
+    pub workdir: std::path::PathBuf,
+    pub success_msg: String,
 }
 
 pub struct DiffState {
@@ -448,6 +457,7 @@ impl App {
             blame_data: None,
             show_blame: false,
             pending_editor: None,
+            pending_terminal_cmd: None,
             which_key: None,
             conflict_state: None,
             highlighter,
@@ -900,14 +910,12 @@ impl App {
 
             // ── Remote ────────────────────────────────────────────────────
             Message::GitFetch => {
-                self.status_message = Some("Fetching...".into());
-                match self.repo.fetch() {
-                    Ok(msg) => {
-                        self.status_message = Some(format!("Fetch: {msg}"));
-                        self.refresh()?;
-                    }
-                    Err(e) => self.status_message = Some(format!("Fetch failed: {e}")),
-                }
+                self.pending_terminal_cmd = Some(TerminalCmd {
+                    program: "git".into(),
+                    args: vec!["fetch".into(), "--all".into()],
+                    workdir: self.repo.workdir().to_path_buf(),
+                    success_msg: "Fetched successfully".into(),
+                });
             }
 
             // ── Branches ──────────────────────────────────────────────────

@@ -76,6 +76,8 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
         let branch_creating = matches!(app.overlay, Overlay::BranchList { creating: Some(_), .. });
         if app.pending_editor.is_some() {
             spawn_editor(terminal, app)?;
+        } else if app.pending_terminal_cmd.is_some() {
+            run_terminal_cmd(terminal, app)?;
         } else if matches!(app.overlay, Overlay::CommitInput { .. }) {
             if let Some(msg) = poll_with_text_input(app)? {
                 app.update(msg)?;
@@ -149,6 +151,39 @@ fn spawn_editor(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Resul
     // Reload file list and diff
     app.update(app::Message::Refresh)?;
 
+    Ok(())
+}
+
+fn run_terminal_cmd(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+    let cmd = app.pending_terminal_cmd.take().unwrap();
+
+    // Suspend TUI so the command can use the terminal (e.g. SSH passphrase prompt)
+    ratatui::restore();
+
+    let status = std::process::Command::new(&cmd.program)
+        .args(&cmd.args)
+        .current_dir(&cmd.workdir)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status();
+
+    // Restore TUI
+    *terminal = ratatui::init();
+
+    match status {
+        Ok(s) if s.success() => {
+            app.status_message = Some(cmd.success_msg);
+        }
+        Ok(_) => {
+            app.status_message = Some(format!("{} failed", cmd.program));
+        }
+        Err(e) => {
+            app.status_message = Some(format!("Failed to run {}: {e}", cmd.program));
+        }
+    }
+
+    app.update(app::Message::Refresh)?;
     Ok(())
 }
 

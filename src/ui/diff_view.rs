@@ -1,17 +1,19 @@
 use crate::app::{App, ConflictResolution, ConflictState, DiffState, DiffViewMode, Panel};
 use crate::git::DiffLineKind;
 use crate::syntax;
+use crate::theme::Theme;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
     let block = Block::default()
         .title(" Index / HEAD ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(theme.fg_dim));
 
     let Some(ds) = &app.diff_state else {
         let placeholder = Paragraph::new("Select a file to view diff").block(block);
@@ -50,7 +52,7 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
         .map(|(i, dl)| {
             let highlight = get_line_highlight(ds, i, is_focused);
             let line_num = format!("{:>4} ", i + 1);
-            let (num_style, text_style) = line_styles(&dl.kind, &highlight);
+            let (num_style, text_style) = line_styles(&dl.kind, &highlight, theme);
 
             let mut spans = Vec::new();
 
@@ -60,7 +62,7 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
                     .and_then(|fi| blame.get(fi));
                 if let Some(bl) = blame_line {
                     let annotation = format!("{} {:>8} ", bl.hash, truncate_str(&bl.author, 8));
-                    spans.push(Span::styled(annotation, Style::default().fg(Color::DarkGray)));
+                    spans.push(Span::styled(annotation, Style::default().fg(theme.fg_dim)));
                 } else {
                     spans.push(Span::styled("                  ", Style::default()));
                 }
@@ -68,7 +70,7 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
 
             // Show selection indicator in line mode
             if ds.view_mode == DiffViewMode::LineNav && dl.hunk_index.is_some() {
-                spans.push(line_mode_marker(ds, i));
+                spans.push(line_mode_marker(ds, i, theme));
             }
             spans.push(Span::styled(line_num, num_style));
             push_highlighted_content(app, &dl.content, &dl.kind, text_style, &mut spans);
@@ -84,7 +86,7 @@ pub fn render_right(app: &App, frame: &mut Frame, area: Rect) {
     // If in conflict resolver mode
     if let Some(cs) = &app.conflict_state {
         let focused = app.active_panel == crate::app::Panel::DiffView;
-        render_conflict(frame, cs, focused, area);
+        render_conflict(frame, cs, focused, area, &app.theme);
         return;
     }
 
@@ -92,11 +94,12 @@ pub fn render_right(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
+    let theme = &app.theme;
     let is_focused = app.active_panel == Panel::DiffView;
     let border_color = if is_focused {
-        Color::Cyan
+        theme.cyan
     } else {
-        Color::DarkGray
+        theme.fg_dim
     };
 
     let title = match &app.diff_state {
@@ -142,12 +145,12 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
             let highlight = get_line_highlight(ds, i, is_focused);
 
             let line_num = format!("{:>4} ", i + 1);
-            let (num_style, text_style) = line_styles(&dl.kind, &highlight);
+            let (num_style, text_style) = line_styles(&dl.kind, &highlight, theme);
 
             let mut spans = Vec::new();
             // Show selection indicator in line mode
             if ds.view_mode == DiffViewMode::LineNav && dl.hunk_index.is_some() {
-                spans.push(line_mode_marker(ds, i));
+                spans.push(line_mode_marker(ds, i, theme));
             }
             spans.push(Span::styled(line_num, num_style));
             push_highlighted_content(app, &dl.content, &dl.kind, text_style, &mut spans);
@@ -165,12 +168,12 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, main_area);
 
-    render_change_overview(frame, ds, bar_area);
+    render_change_overview(frame, ds, bar_area, theme);
 }
 
 /// Render a 1-column-wide change overview bar showing where modifications are in the file.
 /// Green = added, Red = removed, DarkGray = equal, Cyan = viewport indicator.
-fn render_change_overview(frame: &mut Frame, ds: &DiffState, area: Rect) {
+fn render_change_overview(frame: &mut Frame, ds: &DiffState, area: Rect, theme: &Theme) {
     let bar_height = area.height as usize;
     if bar_height == 0 {
         return;
@@ -206,22 +209,22 @@ fn render_change_overview(frame: &mut Frame, ds: &DiffState, area: Rect) {
         let in_viewport = file_start < viewport_end && file_end > viewport_start;
 
         let (ch, color) = if has_added && has_removed {
-            ("┃", Color::Yellow)
+            ("┃", theme.yellow)
         } else if has_added {
-            ("┃", Color::Green)
+            ("┃", theme.green)
         } else if has_removed {
-            ("┃", Color::Red)
+            ("┃", theme.red)
         } else if in_viewport {
-            ("│", Color::DarkGray)
+            ("│", theme.fg_dim)
         } else {
-            (" ", Color::DarkGray)
+            (" ", theme.fg_dim)
         };
 
         // Brighten viewport indicator
         let bg = if in_viewport {
-            Color::Rgb(30, 30, 40)
+            theme.diff_viewport_bg
         } else {
-            Color::Reset
+            theme.bg
         };
 
         bar_lines.push(Line::from(Span::styled(ch, Style::default().fg(color).bg(bg))));
@@ -276,36 +279,36 @@ fn get_line_highlight(
     }
 }
 
-fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: Rect) {
+fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: Rect, theme: &Theme) {
     let section = &cs.sections[cs.current_section];
 
     let (res_label, res_color) = match section.resolution {
-        ConflictResolution::Unresolved => ("UNRESOLVED", Color::Red),
-        ConflictResolution::Ours => (&*cs.left_name, Color::Cyan),
-        ConflictResolution::Theirs => (&*cs.right_name, Color::Magenta),
-        ConflictResolution::Both => ("BOTH", Color::Green),
+        ConflictResolution::Unresolved => ("UNRESOLVED", theme.red),
+        ConflictResolution::Ours => (&*cs.left_name, theme.cyan),
+        ConflictResolution::Theirs => (&*cs.right_name, theme.magenta),
+        ConflictResolution::Both => ("BOTH", theme.green),
     };
 
     // Top status bar
     let top_line = Line::from(vec![
         Span::styled(
             format!(" {} ", cs.file_path),
-            Style::default().fg(Color::White).bg(Color::DarkGray),
+            Style::default().fg(theme.fg).bg(theme.fg_dim),
         ),
         Span::styled(
             format!(" {}/{} ", cs.current_section + 1, cs.sections.len()),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme.yellow),
         ),
         Span::styled(
             format!(" {res_label} "),
             Style::default()
-                .fg(Color::Black)
+                .fg(theme.black)
                 .bg(res_color)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             "  Space:actions  ↑/↓:navigate  ←/Esc:back ".to_string(),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.fg_dim),
         ),
     ]);
     let status_area = Rect { height: 1, ..area };
@@ -327,23 +330,23 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
 
     // Colors depend on focus: bright when focused, dim when viewing from file list
     let (left_fg, left_border, left_bg) = if left_selected {
-        (Color::Cyan, Color::Cyan, Color::Rgb(10, 40, 50))
+        (theme.cyan, theme.cyan, theme.conflict_ours_bg)
     } else if focused {
-        (Color::Rgb(100, 100, 100), Color::Rgb(70, 70, 70), Color::Rgb(15, 15, 15))
+        (theme.conflict_dim_fg, theme.conflict_dim_border, theme.conflict_dim_bg)
     } else {
-        (Color::DarkGray, Color::DarkGray, Color::Reset)
+        (theme.fg_dim, theme.fg_dim, theme.bg)
     };
 
     let (right_fg, right_border, right_bg) = if right_selected {
-        (Color::Rgb(255, 100, 255), Color::Rgb(255, 100, 255), Color::Rgb(40, 10, 50))
+        (theme.conflict_theirs_accent, theme.conflict_theirs_accent, theme.conflict_theirs_bg)
     } else if focused {
-        (Color::Rgb(100, 100, 100), Color::Rgb(70, 70, 70), Color::Rgb(15, 15, 15))
+        (theme.conflict_dim_fg, theme.conflict_dim_border, theme.conflict_dim_bg)
     } else {
-        (Color::DarkGray, Color::DarkGray, Color::Reset)
+        (theme.fg_dim, theme.fg_dim, theme.bg)
     };
 
-    let left_title_fg = if focused || left_selected { Color::Cyan } else { Color::DarkGray };
-    let right_title_fg = if focused || right_selected { Color::Magenta } else { Color::DarkGray };
+    let left_title_fg = if focused || left_selected { theme.cyan } else { theme.fg_dim };
+    let right_title_fg = if focused || right_selected { theme.magenta } else { theme.fg_dim };
 
     // Left panel (ours / left branch)
     let left_block = Block::default()
@@ -365,8 +368,8 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
     };
     let context_after: &[String] = &section.suffix;
 
-    let context_style = Style::default().fg(Color::DarkGray);
-    let marker_style = Style::default().fg(Color::DarkGray);
+    let context_style = Style::default().fg(theme.fg_dim);
+    let marker_style = Style::default().fg(theme.fg_dim);
 
     let mut left_lines: Vec<Line> = Vec::new();
     for l in context_before {
@@ -445,7 +448,7 @@ fn push_highlighted_content<'a>(
     // Try syntax highlighting based on file extension
     if let Some(ds) = &app.diff_state {
         if let Some(ext) = syntax::file_extension(&ds.file_path) {
-            let bg = fallback_style.bg.unwrap_or(Color::Reset);
+            let bg = fallback_style.bg.unwrap_or(app.theme.bg);
             if let Some(highlighted) = app.highlighter.highlight_line(content, ext, bg) {
                 spans.extend(highlighted);
                 return;
@@ -466,70 +469,70 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     }
 }
 
-fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight) -> (Style, Style) {
+fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight, theme: &Theme) -> (Style, Style) {
     let (bg, change_bg_boost) = match highlight {
-        LineHighlight::CursorLine => (Color::Rgb(60, 55, 20), true),
-        LineHighlight::SelectedStage => (Color::Rgb(20, 50, 20), true),
-        LineHighlight::SelectedUnstage => (Color::Rgb(50, 20, 20), true),
-        LineHighlight::CurrentHunk => (Color::Rgb(30, 30, 50), true),
-        LineHighlight::None => (Color::Reset, false),
+        LineHighlight::CursorLine => (theme.diff_cursor_bg, true),
+        LineHighlight::SelectedStage => (theme.diff_selected_stage_bg, true),
+        LineHighlight::SelectedUnstage => (theme.diff_selected_unstage_bg, true),
+        LineHighlight::CurrentHunk => (theme.diff_hunk_bg, true),
+        LineHighlight::None => (theme.bg, false),
     };
 
     match kind {
         DiffLineKind::Equal => (
-            Style::default().fg(Color::DarkGray).bg(bg),
-            Style::default().fg(Color::White).bg(bg),
+            Style::default().fg(theme.fg_dim).bg(bg),
+            Style::default().fg(theme.fg).bg(bg),
         ),
         DiffLineKind::Removed => (
-            Style::default().fg(Color::DarkGray).bg(bg),
-            Style::default().fg(Color::Red).bg(if change_bg_boost {
-                Color::Rgb(60, 20, 20)
+            Style::default().fg(theme.fg_dim).bg(bg),
+            Style::default().fg(theme.red).bg(if change_bg_boost {
+                theme.diff_removed_bg_bright
             } else {
-                Color::Rgb(40, 10, 10)
+                theme.diff_removed_bg
             }),
         ),
         DiffLineKind::Added => {
             let is_unstage = *highlight == LineHighlight::SelectedUnstage;
             (
-                Style::default().fg(Color::DarkGray).bg(bg),
+                Style::default().fg(theme.fg_dim).bg(bg),
                 Style::default()
-                    .fg(if is_unstage { Color::Red } else { Color::Green })
+                    .fg(if is_unstage { theme.red } else { theme.green })
                     .bg(if is_unstage {
-                        if change_bg_boost { Color::Rgb(60, 20, 20) } else { Color::Rgb(40, 10, 10) }
+                        if change_bg_boost { theme.diff_removed_bg_bright } else { theme.diff_removed_bg }
                     } else if change_bg_boost {
-                        Color::Rgb(20, 60, 20)
+                        theme.diff_added_bg_bright
                     } else {
-                        Color::Rgb(10, 40, 10)
+                        theme.diff_added_bg
                     }),
             )
         }
         DiffLineKind::Spacer => (
-            Style::default().fg(Color::DarkGray).bg(bg),
-            Style::default().fg(Color::DarkGray).bg(bg),
+            Style::default().fg(theme.fg_dim).bg(bg),
+            Style::default().fg(theme.fg_dim).bg(bg),
         ),
     }
 }
 
 /// Produce the 2-char selection marker for line-by-line mode.
-fn line_mode_marker(ds: &DiffState, row: usize) -> Span<'static> {
+fn line_mode_marker(ds: &DiffState, row: usize, theme: &Theme) -> Span<'static> {
     let is_selected = ds.selected_lines.contains(&row);
     let is_cursor = row == ds.cursor_line;
     let (mark, mark_color) = if ds.is_staged {
-        ("-", Color::Red)
+        ("-", theme.red)
     } else {
-        ("+", Color::Green)
+        ("+", theme.green)
     };
     match (is_cursor, is_selected) {
         (true, true) => Span::styled(
             ">>",
             Style::default()
-                .fg(Color::Rgb(255, 200, 60))
+                .fg(theme.orange)
                 .add_modifier(Modifier::BOLD),
         ),
         (true, false) => Span::styled(
             "> ",
             Style::default()
-                .fg(Color::Rgb(255, 200, 60))
+                .fg(theme.orange)
                 .add_modifier(Modifier::BOLD),
         ),
         (false, true) => Span::styled(

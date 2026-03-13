@@ -10,10 +10,14 @@ pub struct Highlighter {
 }
 
 impl Highlighter {
-    pub fn new() -> Self {
+    pub fn new(theme_name: &str) -> Self {
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let theme_set = ThemeSet::load_defaults();
-        let theme = theme_set.themes["base16-eighties.dark"].clone();
+        let theme = theme_set
+            .themes
+            .get(theme_name)
+            .unwrap_or(&theme_set.themes["base16-eighties.dark"])
+            .clone();
         Highlighter { syntax_set, theme }
     }
 

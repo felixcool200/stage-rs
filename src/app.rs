@@ -1,5 +1,6 @@
 use crate::git::{self, BlameLine, BranchEntry, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LogEntry, StashEntry};
 use crate::syntax::Highlighter;
+use crate::theme::Theme;
 use color_eyre::{eyre::eyre, Result};
 use std::collections::BTreeSet;
 use std::time::Instant;
@@ -33,6 +34,8 @@ pub struct App {
     pub conflict_state: Option<ConflictState>,
     /// Syntax highlighter
     pub highlighter: Highlighter,
+    /// UI color theme
+    pub theme: Theme,
 }
 
 pub struct ConflictState {
@@ -417,6 +420,8 @@ impl App {
         let branch_name = repo.branch_name();
         let ahead_behind = repo.ahead_behind();
         let file_entries = repo.get_file_statuses()?;
+        let theme = Theme::from_env();
+        let highlighter = Highlighter::new(&theme.syntax_theme);
 
         let mut app = Self {
             repo,
@@ -438,7 +443,8 @@ impl App {
             pending_editor: None,
             which_key: None,
             conflict_state: None,
-            highlighter: Highlighter::new(),
+            highlighter,
+            theme,
         };
         // Load diff for the initially selected file
         if !app.file_entries.is_empty() {

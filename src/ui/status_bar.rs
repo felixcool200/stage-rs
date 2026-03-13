@@ -1,6 +1,6 @@
 use crate::app::{App, DiffViewMode, Panel};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
@@ -27,17 +27,17 @@ pub fn render_header(app: &App, frame: &mut Frame, area: Rect) {
         Span::styled(
             format!("  {branch}{ab_str} "),
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
+                .fg(app.theme.black)
+                .bg(app.theme.cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!(" {file_count} changes "),
-            Style::default().fg(Color::White).bg(Color::DarkGray),
+            Style::default().fg(app.theme.fg).bg(app.theme.fg_dim),
         ),
         Span::styled(
             "  Space: commands  q: quit ",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(app.theme.fg_dim),
         ),
     ]);
 
@@ -52,16 +52,16 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         .unwrap_or(false);
 
     let (mode_label, mode_bg) = match (app.active_panel, in_line_mode) {
-        (Panel::FileList, _) => ("FILES", Color::Blue),
-        (Panel::DiffView, false) => ("NORMAL", Color::Blue),
-        (Panel::DiffView, true) => ("SELECT", Color::Magenta),
+        (Panel::FileList, _) => ("FILES", app.theme.blue),
+        (Panel::DiffView, false) => ("NORMAL", app.theme.blue),
+        (Panel::DiffView, true) => ("SELECT", app.theme.magenta),
     };
 
     let mut spans = vec![
         Span::styled(
             format!(" {mode_label} "),
             Style::default()
-                .fg(Color::Black)
+                .fg(app.theme.black)
                 .bg(mode_bg)
                 .add_modifier(Modifier::BOLD),
         ),
@@ -70,13 +70,13 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     if let Some(ds) = &app.diff_state {
         spans.push(Span::styled(
             format!(" {} ", ds.file_path),
-            Style::default().fg(Color::White),
+            Style::default().fg(app.theme.fg),
         ));
         match ds.view_mode {
             DiffViewMode::HunkNav if !ds.hunks.is_empty() => {
                 spans.push(Span::styled(
                     format!("hunk {}/{} ", ds.current_hunk + 1, ds.hunks.len()),
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(app.theme.cyan),
                 ));
             }
             DiffViewMode::LineNav => {
@@ -85,7 +85,7 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                 let verb = if ds.is_staged { "to unstage" } else { "selected" };
                 spans.push(Span::styled(
                     format!("{sel}/{total} lines {verb} "),
-                    Style::default().fg(Color::Magenta),
+                    Style::default().fg(app.theme.magenta),
                 ));
             }
             _ => {}
@@ -95,7 +95,7 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     if let Some(msg) = &app.status_message {
         spans.push(Span::styled(
             format!(" | {msg}"),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(app.theme.yellow),
         ));
     }
 
@@ -110,7 +110,7 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     };
     spans.push(Span::styled(
         nav_hint,
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(app.theme.fg_dim),
     ));
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);

@@ -1,7 +1,7 @@
 use crate::app::{App, Panel};
 use crate::git::FileStatus;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
@@ -9,9 +9,9 @@ use ratatui::Frame;
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let is_focused = app.active_panel == Panel::FileList;
     let border_color = if is_focused {
-        Color::Cyan
+        app.theme.cyan
     } else {
-        Color::DarkGray
+        app.theme.fg_dim
     };
 
     let filtering = app.file_filter.is_some();
@@ -52,10 +52,10 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     // "Repository" header entry at position 0
     let header_style = if app.header_selected && is_focused {
         Style::default()
-            .fg(Color::Cyan)
+            .fg(app.theme.cyan)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::White)
+        Style::default().fg(app.theme.fg)
     };
     items.push(ListItem::new(Line::from(vec![
         Span::styled(" ", Style::default()),
@@ -79,17 +79,17 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             items.push(ListItem::new(Line::from(vec![Span::styled(
                 format!(" {section} ({count})"),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(app.theme.yellow)
                     .add_modifier(Modifier::BOLD),
             )])));
             list_index_to_entry.push(None);
         }
 
         let status_color = match &entry.status {
-            FileStatus::Staged(_) => Color::Green,
-            FileStatus::Unstaged(_) => Color::Yellow,
-            FileStatus::Conflict => Color::Red,
-            FileStatus::Untracked => Color::Gray,
+            FileStatus::Staged(_) => app.theme.green,
+            FileStatus::Unstaged(_) => app.theme.yellow,
+            FileStatus::Conflict => app.theme.red,
+            FileStatus::Untracked => app.theme.gray,
         };
 
         let label = entry.status.short_label();
@@ -108,12 +108,12 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         let first_line = Line::from(vec![
             Span::raw("  "),
             Span::styled(format!("{label} "), Style::default().fg(status_color)),
-            Span::styled(filename, Style::default().fg(Color::White)),
+            Span::styled(filename, Style::default().fg(app.theme.fg)),
         ]);
 
         let mut second_spans: Vec<Span> = Vec::new();
         if !dir.is_empty() {
-            second_spans.push(Span::styled(format!("    {}", dir.trim()), Style::default().fg(Color::DarkGray)));
+            second_spans.push(Span::styled(format!("    {}", dir.trim()), Style::default().fg(app.theme.fg_dim)));
         }
         if entry.insertions > 0 || entry.deletions > 0 {
             if !second_spans.is_empty() {
@@ -124,7 +124,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             if entry.insertions > 0 {
                 second_spans.push(Span::styled(
                     format!("+{}", entry.insertions),
-                    Style::default().fg(Color::Green),
+                    Style::default().fg(app.theme.green),
                 ));
             }
             if entry.deletions > 0 {
@@ -133,7 +133,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
                 }
                 second_spans.push(Span::styled(
                     format!("-{}", entry.deletions),
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(app.theme.red),
                 ));
             }
         }
@@ -158,7 +158,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let list = List::new(items)
         .highlight_style(
             Style::default()
-                .bg(Color::DarkGray)
+                .bg(app.theme.fg_dim)
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -169,9 +169,9 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     // Render filter input
     if let (Some(fa), Some(ref filter_text)) = (filter_area, &app.file_filter) {
         let line = Line::from(vec![
-            Span::styled("/", Style::default().fg(Color::Cyan)),
-            Span::styled(filter_text.as_str(), Style::default().fg(Color::White)),
-            Span::styled("_", Style::default().fg(Color::White).add_modifier(Modifier::SLOW_BLINK)),
+            Span::styled("/", Style::default().fg(app.theme.cyan)),
+            Span::styled(filter_text.as_str(), Style::default().fg(app.theme.fg)),
+            Span::styled("_", Style::default().fg(app.theme.fg).add_modifier(Modifier::SLOW_BLINK)),
         ]);
         frame.render_widget(Paragraph::new(line), fa);
     }

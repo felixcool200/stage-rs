@@ -3,6 +3,7 @@ mod event;
 mod git;
 mod keymap;
 mod syntax;
+mod theme;
 mod ui;
 
 use app::{App, Overlay};

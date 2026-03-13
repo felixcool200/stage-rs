@@ -1,58 +1,61 @@
 use crate::app::{App, Overlay, WhichKeyEntry};
+use crate::theme::Theme;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
 pub fn render(app: &App, frame: &mut Frame) {
+    let theme = &app.theme;
+
     // Render which-key popup if open
     if let Some(entries) = &app.which_key {
-        render_which_key(frame, entries);
+        render_which_key(frame, entries, theme);
         return;
     }
 
     match &app.overlay {
         Overlay::None => {}
         Overlay::Confirm { message, .. } => {
-            render_confirm(frame, message);
+            render_confirm(frame, message, theme);
         }
         Overlay::CommitInput { input, amend } => {
-            render_commit_input(frame, input, *amend);
+            render_commit_input(frame, input, *amend, theme);
         }
         Overlay::GitLog {
             entries,
             selected,
             scroll,
         } => {
-            render_git_log(frame, entries, *selected, *scroll);
+            render_git_log(frame, entries, *selected, *scroll, theme);
         }
         Overlay::StashList { entries, selected } => {
-            render_stash_list(frame, entries, *selected);
+            render_stash_list(frame, entries, *selected, theme);
         }
         Overlay::BranchList { entries, selected, creating } => {
-            render_branch_list(frame, entries, *selected, creating.as_deref());
+            render_branch_list(frame, entries, *selected, creating.as_deref(), theme);
         }
         Overlay::CommitDetail { hash, message, diff_lines, scroll } => {
-            render_commit_detail(frame, hash, message, diff_lines, *scroll);
+            render_commit_detail(frame, hash, message, diff_lines, *scroll, theme);
         }
         Overlay::Rebase { entries, selected, .. } => {
-            render_rebase(frame, entries, *selected);
+            render_rebase(frame, entries, *selected, theme);
         }
         Overlay::DirtyCheckout { branch, has_conflicts } => {
-            render_dirty_checkout(frame, branch, *has_conflicts);
+            render_dirty_checkout(frame, branch, *has_conflicts, theme);
         }
     }
 }
 
-fn render_confirm(frame: &mut Frame, message: &str) {
+fn render_confirm(frame: &mut Frame, message: &str, theme: &Theme) {
     let area = centered_rect(50, 20, frame.area());
     frame.render_widget(Clear, area);
 
     let block = Block::default()
         .title(" Confirm ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red));
+        .border_style(Style::default().fg(theme.red));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -61,14 +64,14 @@ fn render_confirm(frame: &mut Frame, message: &str) {
         Line::from(""),
         Line::from(Span::styled(
             message,
-            Style::default().fg(Color::White),
+            Style::default().fg(theme.fg),
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled(" [y/Enter] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::styled("Yes  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(" [n/Esc] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::styled("No", Style::default().fg(Color::DarkGray)),
+            Span::styled(" [y/Enter] ", Style::default().fg(theme.green).add_modifier(Modifier::BOLD)),
+            Span::styled("Yes  ", Style::default().fg(theme.fg_dim)),
+            Span::styled(" [n/Esc] ", Style::default().fg(theme.red).add_modifier(Modifier::BOLD)),
+            Span::styled("No", Style::default().fg(theme.fg_dim)),
         ]),
     ];
 
@@ -76,14 +79,14 @@ fn render_confirm(frame: &mut Frame, message: &str) {
     frame.render_widget(paragraph, inner);
 }
 
-fn render_dirty_checkout(frame: &mut Frame, branch: &str, has_conflicts: bool) {
+fn render_dirty_checkout(frame: &mut Frame, branch: &str, has_conflicts: bool, theme: &Theme) {
     let area = centered_rect(50, 25, frame.area());
     frame.render_widget(Clear, area);
 
     let block = Block::default()
         .title(" Uncommitted Changes ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(Style::default().fg(theme.yellow));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -92,11 +95,11 @@ fn render_dirty_checkout(frame: &mut Frame, branch: &str, has_conflicts: bool) {
         Line::from(""),
         Line::from(Span::styled(
             "You have uncommitted changes.".to_string(),
-            Style::default().fg(Color::White),
+            Style::default().fg(theme.fg),
         )),
         Line::from(Span::styled(
             format!("Switch to {branch}?"),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme.yellow),
         )),
         Line::from(""),
     ];
@@ -104,22 +107,22 @@ fn render_dirty_checkout(frame: &mut Frame, branch: &str, has_conflicts: bool) {
     if has_conflicts {
         lines.push(Line::from(Span::styled(
             " Stash unavailable (unmerged files)",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.fg_dim),
         )));
     } else {
         lines.push(Line::from(vec![
-            Span::styled(" [s] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled("Stash & switch", Style::default().fg(Color::DarkGray)),
+            Span::styled(" [s] ", Style::default().fg(theme.cyan).add_modifier(Modifier::BOLD)),
+            Span::styled("Stash & switch", Style::default().fg(theme.fg_dim)),
         ]));
     }
 
     lines.push(Line::from(vec![
-        Span::styled(" [d] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-        Span::styled("Discard & switch", Style::default().fg(Color::DarkGray)),
+        Span::styled(" [d] ", Style::default().fg(theme.red).add_modifier(Modifier::BOLD)),
+        Span::styled("Discard & switch", Style::default().fg(theme.fg_dim)),
     ]));
     lines.push(Line::from(vec![
-        Span::styled(" [Esc] ", Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)),
-        Span::styled("Cancel", Style::default().fg(Color::DarkGray)),
+        Span::styled(" [Esc] ", Style::default().fg(theme.fg_dim).add_modifier(Modifier::BOLD)),
+        Span::styled("Cancel", Style::default().fg(theme.fg_dim)),
     ]));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
@@ -130,6 +133,7 @@ fn render_commit_input(
     frame: &mut Frame,
     input: &crate::app::TextInput,
     amend: bool,
+    theme: &Theme,
 ) {
     let area = centered_rect(60, 50, frame.area());
     frame.render_widget(Clear, area);
@@ -143,7 +147,7 @@ fn render_commit_input(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(Style::default().fg(theme.yellow));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -162,14 +166,14 @@ fn render_commit_input(
         let display = if line_text.is_empty() { " " } else { line_text.as_str() };
         lines.push(Line::from(Span::styled(
             display,
-            Style::default().fg(Color::White),
+            Style::default().fg(theme.fg),
         )));
     }
 
     // Fill remaining with ~ indicators
     let text_height = text_area.height as usize;
     while lines.len() < text_height {
-        lines.push(Line::from(Span::styled("~", Style::default().fg(Color::DarkGray))));
+        lines.push(Line::from(Span::styled("~", Style::default().fg(theme.fg_dim))));
     }
 
     let paragraph = Paragraph::new(lines);
@@ -185,7 +189,7 @@ fn render_commit_input(
         Line::from(""),
         Line::from(Span::styled(
             " Ctrl+S: commit  Esc: cancel  Enter: new line ",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.fg_dim),
         )),
     ];
     frame.render_widget(Paragraph::new(hint_lines), hint_area);
@@ -196,6 +200,7 @@ fn render_git_log(
     entries: &[crate::git::LogEntry],
     selected: usize,
     _scroll: usize,
+    theme: &Theme,
 ) {
     let area = centered_rect(80, 70, frame.area());
     frame.render_widget(Clear, area);
@@ -203,17 +208,17 @@ fn render_git_log(
     let block = Block::default()
         .title(format!(" Git Log ({} commits) ", entries.len()))
         .title_bottom(Line::from(vec![
-            Span::styled(" y", Style::default().fg(Color::Yellow)),
-            Span::styled(":yank hash  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Enter", Style::default().fg(Color::Yellow)),
-            Span::styled(":view  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("r", Style::default().fg(Color::Yellow)),
-            Span::styled(":rebase  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("q/Esc", Style::default().fg(Color::Yellow)),
-            Span::styled(":close ", Style::default().fg(Color::DarkGray)),
+            Span::styled(" y", Style::default().fg(theme.yellow)),
+            Span::styled(":yank hash  ", Style::default().fg(theme.fg_dim)),
+            Span::styled("Enter", Style::default().fg(theme.yellow)),
+            Span::styled(":view  ", Style::default().fg(theme.fg_dim)),
+            Span::styled("r", Style::default().fg(theme.yellow)),
+            Span::styled(":rebase  ", Style::default().fg(theme.fg_dim)),
+            Span::styled("q/Esc", Style::default().fg(theme.yellow)),
+            Span::styled(":close ", Style::default().fg(theme.fg_dim)),
         ]))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(theme.cyan));
 
     let items: Vec<ListItem> = entries
         .iter()
@@ -222,18 +227,18 @@ fn render_git_log(
                 Span::styled(
                     format!("{} ", e.hash),
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(theme.yellow)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("{} ", e.date),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme.fg_dim),
                 ),
                 Span::styled(
                     format!("{} ", e.author),
-                    Style::default().fg(Color::Green),
+                    Style::default().fg(theme.green),
                 ),
-                Span::styled(&e.message, Style::default().fg(Color::White)),
+                Span::styled(&e.message, Style::default().fg(theme.fg)),
             ]))
         })
         .collect();
@@ -242,7 +247,7 @@ fn render_git_log(
         .block(block)
         .highlight_style(
             Style::default()
-                .bg(Color::DarkGray)
+                .bg(theme.fg_dim)
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -256,6 +261,7 @@ fn render_branch_list(
     entries: &[crate::git::BranchEntry],
     selected: usize,
     creating: Option<&str>,
+    theme: &Theme,
 ) {
     let area = centered_rect(60, 60, frame.area());
     frame.render_widget(Clear, area);
@@ -269,7 +275,7 @@ fn render_branch_list(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Green));
+        .border_style(Style::default().fg(theme.green));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -279,12 +285,12 @@ fn render_branch_list(
             Line::from(""),
             Line::from(Span::styled(
                 "  Branch name:",
-                Style::default().fg(Color::White),
+                Style::default().fg(theme.fg),
             )),
             Line::from(vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(name, Style::default().fg(Color::Cyan)),
-                Span::styled("_", Style::default().fg(Color::White).add_modifier(Modifier::SLOW_BLINK)),
+                Span::styled(name, Style::default().fg(theme.cyan)),
+                Span::styled("_", Style::default().fg(theme.fg).add_modifier(Modifier::SLOW_BLINK)),
             ]),
         ];
         let paragraph = Paragraph::new(lines);
@@ -297,14 +303,14 @@ fn render_branch_list(
         .map(|e| {
             let marker = if e.is_current { "* " } else { "  " };
             let name_color = if e.is_current {
-                Color::Green
+                theme.green
             } else if e.is_remote {
-                Color::Red
+                theme.red
             } else {
-                Color::White
+                theme.fg
             };
             ListItem::new(Line::from(vec![
-                Span::styled(marker, Style::default().fg(Color::Green)),
+                Span::styled(marker, Style::default().fg(theme.green)),
                 Span::styled(&e.name, Style::default().fg(name_color)),
             ]))
         })
@@ -312,7 +318,7 @@ fn render_branch_list(
 
     let list = List::new(items).highlight_style(
         Style::default()
-            .bg(Color::DarkGray)
+            .bg(theme.fg_dim)
             .add_modifier(Modifier::BOLD),
     );
 
@@ -327,6 +333,7 @@ fn render_commit_detail(
     message: &str,
     diff_lines: &[String],
     scroll: usize,
+    theme: &Theme,
 ) {
     let area = centered_rect(85, 80, frame.area());
     frame.render_widget(Clear, area);
@@ -334,7 +341,7 @@ fn render_commit_detail(
     let block = Block::default()
         .title(format!(" {hash} - {message} [q/Esc to close, ↑/↓ to scroll] "))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(Style::default().fg(theme.yellow));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -345,16 +352,15 @@ fn render_commit_detail(
         .skip(scroll)
         .take(visible_height)
         .map(|line| {
-            let (color, prefix_style) = if line.starts_with('+') {
-                (Color::Green, Color::Green)
+            let color = if line.starts_with('+') {
+                theme.green
             } else if line.starts_with('-') {
-                (Color::Red, Color::Red)
+                theme.red
             } else if line.starts_with("@@") {
-                (Color::Cyan, Color::Cyan)
+                theme.cyan
             } else {
-                (Color::White, Color::DarkGray)
+                theme.fg
             };
-            let _ = prefix_style;
             Line::from(Span::styled(line.as_str(), Style::default().fg(color)))
         })
         .collect();
@@ -367,6 +373,7 @@ fn render_rebase(
     frame: &mut Frame,
     entries: &[crate::app::RebaseEntry],
     selected: usize,
+    theme: &Theme,
 ) {
     let area = centered_rect(75, 60, frame.area());
     frame.render_widget(Clear, area);
@@ -374,15 +381,15 @@ fn render_rebase(
     let block = Block::default()
         .title(" Interactive Rebase [Space]cycle [Shift+↑/↓]reorder [Enter]execute [q]cancel ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Magenta));
+        .border_style(Style::default().fg(theme.magenta));
 
     let items: Vec<ListItem> = entries
         .iter()
         .map(|e| {
             let action_color = match e.action {
-                crate::app::RebaseAction::Pick => Color::Green,
-                crate::app::RebaseAction::Squash => Color::Yellow,
-                crate::app::RebaseAction::Drop => Color::Red,
+                crate::app::RebaseAction::Pick => theme.green,
+                crate::app::RebaseAction::Squash => theme.yellow,
+                crate::app::RebaseAction::Drop => theme.red,
             };
             ListItem::new(Line::from(vec![
                 Span::styled(
@@ -391,9 +398,9 @@ fn render_rebase(
                 ),
                 Span::styled(
                     format!("{} ", e.hash),
-                    Style::default().fg(Color::Yellow),
+                    Style::default().fg(theme.yellow),
                 ),
-                Span::styled(&e.message, Style::default().fg(Color::White)),
+                Span::styled(&e.message, Style::default().fg(theme.fg)),
             ]))
         })
         .collect();
@@ -402,7 +409,7 @@ fn render_rebase(
         .block(block)
         .highlight_style(
             Style::default()
-                .bg(Color::DarkGray)
+                .bg(theme.fg_dim)
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -415,6 +422,7 @@ fn render_stash_list(
     frame: &mut Frame,
     entries: &[crate::git::StashEntry],
     selected: usize,
+    theme: &Theme,
 ) {
     let area = centered_rect(70, 50, frame.area());
     frame.render_widget(Clear, area);
@@ -425,7 +433,7 @@ fn render_stash_list(
             entries.len()
         ))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Magenta));
+        .border_style(Style::default().fg(theme.magenta));
 
     let items: Vec<ListItem> = entries
         .iter()
@@ -434,10 +442,10 @@ fn render_stash_list(
                 Span::styled(
                     format!("stash@{{{}}} ", e.index),
                     Style::default()
-                        .fg(Color::Yellow)
+                        .fg(theme.yellow)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(&e.message, Style::default().fg(Color::White)),
+                Span::styled(&e.message, Style::default().fg(theme.fg)),
             ]))
         })
         .collect();
@@ -446,7 +454,7 @@ fn render_stash_list(
         .block(block)
         .highlight_style(
             Style::default()
-                .bg(Color::DarkGray)
+                .bg(theme.fg_dim)
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -455,7 +463,7 @@ fn render_stash_list(
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_which_key(frame: &mut Frame, entries: &[WhichKeyEntry]) {
+fn render_which_key(frame: &mut Frame, entries: &[WhichKeyEntry], theme: &Theme) {
     let cols = 3;
     let rows = entries.len().div_ceil(cols);
     let popup_height = rows as u16 + 2; // +2 for borders
@@ -473,7 +481,7 @@ fn render_which_key(frame: &mut Frame, entries: &[WhichKeyEntry]) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(theme.fg_dim));
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
@@ -488,14 +496,14 @@ fn render_which_key(frame: &mut Frame, entries: &[WhichKeyEntry]) {
                 spans.push(Span::styled(
                     format!(" {}", entry.key),
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme.cyan)
                         .add_modifier(Modifier::BOLD),
                 ));
                 let label = format!(" {}", entry.label);
                 let pad = col_width.saturating_sub(2 + entry.label.len());
                 spans.push(Span::styled(
                     label,
-                    Style::default().fg(Color::White),
+                    Style::default().fg(theme.fg),
                 ));
                 spans.push(Span::raw(" ".repeat(pad)));
             }

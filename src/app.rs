@@ -687,12 +687,22 @@ impl App {
                 if let Some(ds) = &self.diff_state {
                     let path = ds.file_path.clone();
 
-                    // Map current diff scroll position to a file line number.
-                    // Count non-spacer lines in right_lines up to the scroll position.
-                    let scroll = ds.scroll;
+                    // Pick the diff display row closest to what the user is looking at:
+                    // - In line mode: the cursor position
+                    // - In hunk mode: the start of the current hunk
+                    let target_row = if ds.view_mode == DiffViewMode::LineNav {
+                        ds.cursor_line
+                    } else if let Some(hunk) = ds.hunks.get(ds.current_hunk) {
+                        hunk.display_start
+                    } else {
+                        ds.scroll
+                    };
+
+                    // Map display row to file line number by counting
+                    // non-spacer right_lines (each = one line in the file).
                     let mut file_line: usize = 0;
                     for (i, dl) in ds.right_lines.iter().enumerate() {
-                        if i >= scroll {
+                        if i >= target_row {
                             break;
                         }
                         if dl.kind != git::DiffLineKind::Spacer {

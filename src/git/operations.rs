@@ -316,3 +316,278 @@ pub fn has_staged_changes(repo: &Repository) -> bool {
         )
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::test_helpers::TestRepo;
+
+    #[test]
+    fn test_stage_file() {
+        let tr = TestRepo::with_initial_commit();
+        tr.write_file("new.txt", "content\n");
+        stage_file(&tr.repo, "new.txt").unwrap();
+        let index = tr.repo.index().unwrap();
+        assert!(index.get_path(Path::new("new.txt"), 0).is_some());
+    }
+
+    #[test]
+    fn test_stage_file_deleted() {
+        let tr = TestRepo::with_initial_commit();
+        std::fs::remove_file(tr.workdir().join("hello.txt")).unwrap();
+        stage_file(&tr.repo, "hello.txt").unwrap();
+        let index = tr.repo.index().unwrap();
+        assert!(index.get_path(Path::new("hello.txt"), 0).is_none());
+    }
+
+    #[test]
+    fn test_stage_content() {
+        let tr = TestRepo::with_initial_commit();
+        stage_content(&tr.repo, "hello.txt", "patched\n").unwrap();
+        let index = tr.repo.index().unwrap();
+        let entry = index.get_path(Path::new("hello.txt"), 0).unwrap();
+        let blob = tr.repo.find_blob(entry.id).unwrap();
+        assert_eq!(std::str::from_utf8(blob.content()).unwrap(), "patched\n");
+    }
+
+    #[test]
+    fn test_unstage_file_restores_head() {
+        let tr = TestRepo::with_initial_commit();
+        // Stage a modification
+        tr.write_file("hello.txt", "changed\n");
+        stage_file(&tr.repo, "hello.txt").unwrap();
+        // Unstage it
+        unstage_file(&tr.repo, "hello.txt").unwrap();
+        let index = tr.repo.index().unwrap();
+        let entry = index.get_path(Path::new("hello.txt"), 0).unwrap();
+        let blob = tr.repo.find_blob(entry.id).unwrap();
+        assert_eq!(std::str::from_utf8(blob.content()).unwrap(), "hello\n");
+    }
+
+    #[test]
+    fn test_unstage_file_new_file() {
+        let tr = TestRepo::with_initial_commit();
+        tr.write_file("new.txt", "content\n");
+        stage_file(&tr.repo, "new.txt").unwrap();
+        unstage_file(&tr.repo, "new.txt").unwrap();
+        let index = tr.repo.index().unwrap();
+        assert!(index.get_path(Path::new("new.txt"), 0).is_none());
+    }
+
+    #[test]
+    fn test_discard_changes() {
+        let tr = TestRepo::with_initial_commit();
+        tr.write_file("hello.txt", "modified\n");
+        discard_changes(&tr.repo, "hello.txt").unwrap();
+        let content = std::fs::read_to_string(tr.workdir().join("hello.txt")).unwrap();
+        assert_eq!(content, "hello\n");
+    }
+
+    #[test]
+    fn test_commit_creates_commit() {
+        let tr = TestRepo::with_initial_commit();
+        tr.write_file("hello.txt", "v2\n");
+        stage_file(&tr.repo, "hello.txt").unwrap();
+        commit(&tr.repo, "Second commit").unwrap();
+        let head = tr.repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.message().unwrap(), "Second commit");
+        let tree = head.tree().unwrap();
+        let entry = tree.get_path(Path::new("hello.txt")).unwrap();
+        let blob = tr.repo.find_blob(entry.id()).unwrap();
+        assert_eq!(std::str::from_utf8(blob.content()).unwrap(), "v2\n");
+    }
+
+    #[test]
+    fn test_commit_returns_short_hash() {
+        let tr = TestRepo::with_initial_commit();
+        tr.write_file("hello.txt", "v2\n");
+        stage_file(&tr.repo, "hello.txt").unwrap();
+        let hash = commit(&tr.repo, "test").unwrap();
+        assert_eq!(hash.len(), 7);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_commit_initial() {
+        let tr = TestRepo::new();
+        tr.write_file("first.txt", "first\n");
+        stage_file(&tr.repo, "first.txt").unwrap();
+        let hash = commit(&tr.repo, "Initial").unwrap();
+        assert_eq!(hash.len(), 7);
+        let head = tr.repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.parent_count(), 0);
+    }
+
+    #[test]
+    fn test_commit_with_merge_head() {
+        let tr = TestRepo::with_initial_commit();
+        // Detect the default branch name
+        let default_branch = tr.repo.head().unwrap().shorthand().unwrap().to_string();
+        // Create a second commit on default branch
+        tr.add_and_commit("hello.txt", "main\n", "main change");
+
+        // Create branch from initial commit
+        let initial = tr.repo.head().unwrap().peel_to_commit().unwrap().parent(0).unwrap();
+        tr.repo.branch("feature", &initial, false).unwrap();
+        checkout_branch(&tr.repo, "feature").unwrap();
+        tr.add_and_commit("other.txt", "feature\n", "feature change");
+        let feature_head = tr.repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        // Go back to default branch and fake a merge state
+        checkout_branch(&tr.repo, &default_branch).unwrap();
+        let merge_head_path = tr.repo.path().join("MERGE_HEAD");
+        std::fs::write(&merge_head_path, format!("{}\n", feature_head)).unwrap();
+
+        // Stage something and commit
+        tr.write_file("hello.txt", "merged\n");
+        stage_file(&tr.repo, "hello.txt").unwrap();
+        commit(&tr.repo, "Merge commit").unwrap();
+
+        let head = tr.repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.parent_count(), 2);
+        // MERGE_HEAD should be cleaned up
+        assert!(!merge_head_path.exists());
+    }
+
+    #[test]
+    fn test_commit_amend() {
+        let tr = TestRepo::with_initial_commit();
+        let old_oid = tr.repo.head().unwrap().peel_to_commit().unwrap().id();
+        tr.write_file("hello.txt", "amended\n");
+        stage_file(&tr.repo, "hello.txt").unwrap();
+        commit_amend(&tr.repo, "Amended message").unwrap();
+        let head = tr.repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.message().unwrap(), "Amended message");
+        assert_ne!(head.id(), old_oid);
+    }
+
+    #[test]
+    fn test_undo_last_commit() {
+        let tr = TestRepo::with_initial_commit();
+        tr.add_and_commit("hello.txt", "v2\n", "Second commit");
+        let msg = undo_last_commit(&tr.repo).unwrap();
+        assert_eq!(msg, "Second commit");
+        let head = tr.repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head.message().unwrap(), "Initial commit");
+    }
+
+    #[test]
+    fn test_undo_initial_commit_fails() {
+        let tr = TestRepo::with_initial_commit();
+        let result = undo_last_commit(&tr.repo);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_last_commit_message() {
+        let tr = TestRepo::with_initial_commit();
+        assert_eq!(last_commit_message(&tr.repo).unwrap(), "Initial commit");
+    }
+
+    #[test]
+    fn test_has_staged_changes_true() {
+        let tr = TestRepo::with_initial_commit();
+        tr.write_file("new.txt", "new\n");
+        stage_file(&tr.repo, "new.txt").unwrap();
+        assert!(has_staged_changes(&tr.repo));
+    }
+
+    #[test]
+    fn test_has_staged_changes_false() {
+        let tr = TestRepo::with_initial_commit();
+        assert!(!has_staged_changes(&tr.repo));
+    }
+
+    #[test]
+    fn test_stash_save_and_list() {
+        let mut tr = TestRepo::with_initial_commit();
+        tr.write_file("hello.txt", "dirty\n");
+        stash_save(&mut tr.repo, None).unwrap();
+        // Workdir should be clean
+        let content = std::fs::read_to_string(tr.workdir().join("hello.txt")).unwrap();
+        assert_eq!(content, "hello\n");
+        let entries = stash_list(&mut tr.repo).unwrap();
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn test_stash_pop() {
+        let mut tr = TestRepo::with_initial_commit();
+        tr.write_file("hello.txt", "dirty\n");
+        stash_save(&mut tr.repo, None).unwrap();
+        // Pop succeeds without error
+        stash_pop(&mut tr.repo, 0).unwrap();
+        // Stash list should be empty after pop
+        let entries = stash_list(&mut tr.repo).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_stash_apply() {
+        let mut tr = TestRepo::with_initial_commit();
+        tr.write_file("hello.txt", "dirty\n");
+        stash_save(&mut tr.repo, None).unwrap();
+        // Apply succeeds without error
+        stash_apply(&mut tr.repo, 0).unwrap();
+        // Stash still exists after apply (unlike pop)
+        let entries = stash_list(&mut tr.repo).unwrap();
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn test_stash_drop() {
+        let mut tr = TestRepo::with_initial_commit();
+        tr.write_file("hello.txt", "dirty\n");
+        stash_save(&mut tr.repo, None).unwrap();
+        stash_drop(&mut tr.repo, 0).unwrap();
+        let entries = stash_list(&mut tr.repo).unwrap();
+        assert!(entries.is_empty());
+        // Workdir still clean (stash was not popped)
+        let content = std::fs::read_to_string(tr.workdir().join("hello.txt")).unwrap();
+        assert_eq!(content, "hello\n");
+    }
+
+    #[test]
+    fn test_list_branches() {
+        let tr = TestRepo::with_initial_commit();
+        let head_commit = tr.repo.head().unwrap().peel_to_commit().unwrap();
+        tr.repo.branch("feature", &head_commit, false).unwrap();
+        let branches = list_branches(&tr.repo).unwrap();
+        let local: Vec<_> = branches.iter().filter(|b| !b.is_remote).collect();
+        assert!(local.len() >= 2);
+        assert!(local.iter().any(|b| b.name == "main" || b.name == "master"));
+        assert!(local.iter().any(|b| b.name == "feature"));
+        let current = local.iter().find(|b| b.is_current).unwrap();
+        assert!(current.name == "main" || current.name == "master");
+    }
+
+    #[test]
+    fn test_checkout_branch() {
+        let tr = TestRepo::with_initial_commit();
+        let head_commit = tr.repo.head().unwrap().peel_to_commit().unwrap();
+        tr.repo.branch("feature", &head_commit, false).unwrap();
+        checkout_branch(&tr.repo, "feature").unwrap();
+        let name = tr.repo.head().unwrap().shorthand().unwrap().to_string();
+        assert_eq!(name, "feature");
+    }
+
+    #[test]
+    fn test_create_branch() {
+        let tr = TestRepo::with_initial_commit();
+        create_branch(&tr.repo, "new-branch").unwrap();
+        let name = tr.repo.head().unwrap().shorthand().unwrap().to_string();
+        assert_eq!(name, "new-branch");
+    }
+
+    #[test]
+    fn test_force_checkout_branch() {
+        let tr = TestRepo::with_initial_commit();
+        let head_commit = tr.repo.head().unwrap().peel_to_commit().unwrap();
+        tr.repo.branch("feature", &head_commit, false).unwrap();
+        // Dirty the workdir
+        tr.write_file("hello.txt", "dirty\n");
+        force_checkout_branch(&tr.repo, "feature").unwrap();
+        let name = tr.repo.head().unwrap().shorthand().unwrap().to_string();
+        assert_eq!(name, "feature");
+    }
+}

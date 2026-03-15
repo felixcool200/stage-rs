@@ -173,3 +173,139 @@ fn collect_diff_stats(diff: &git2::Diff, map: &mut HashMap<String, (usize, usize
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::test_helpers::TestRepo;
+
+    // ── Pure function tests ──
+
+    #[test]
+    fn test_sort_key_ordering() {
+        assert!(FileStatus::Conflict.sort_key() < FileStatus::Unstaged(ChangeKind::Modified).sort_key());
+        assert!(FileStatus::Unstaged(ChangeKind::Modified).sort_key() < FileStatus::Untracked.sort_key());
+        assert!(FileStatus::Untracked.sort_key() < FileStatus::Staged(ChangeKind::Modified).sort_key());
+    }
+
+    #[test]
+    fn test_short_label_all_variants() {
+        assert_eq!(FileStatus::Staged(ChangeKind::Modified).short_label(), "M");
+        assert_eq!(FileStatus::Unstaged(ChangeKind::Added).short_label(), "A");
+        assert_eq!(FileStatus::Staged(ChangeKind::Deleted).short_label(), "D");
+        assert_eq!(FileStatus::Unstaged(ChangeKind::Renamed).short_label(), "R");
+        assert_eq!(FileStatus::Untracked.short_label(), "?");
+        assert_eq!(FileStatus::Conflict.short_label(), "C");
+    }
+
+    #[test]
+    fn test_section_name_all_variants() {
+        assert_eq!(FileStatus::Conflict.section_name(), "Merge Conflicts");
+        assert_eq!(FileStatus::Unstaged(ChangeKind::Modified).section_name(), "Changes");
+        assert_eq!(FileStatus::Untracked.section_name(), "Untracked");
+        assert_eq!(FileStatus::Staged(ChangeKind::Added).section_name(), "Staged Changes");
+    }
+
+    // ── Repo-based tests ──
+
+    #[test]
+    fn test_statuses_untracked() {
+        let tr = TestRepo::with_initial_commit();
+        tr.write_file("new.txt", "untracked\n");
+        let entries = get_file_statuses(&tr.repo).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "new.txt");
+        assert_eq!(entries[0].status, FileStatus::Untracked);
+    }
+
+    #[test]
+    fn test_statuses_staged_new() {
+        let tr = TestRepo::with_initial_commit();
+        tr.write_file("new.txt", "staged\n");
+        let mut index = tr.repo.index().unwrap();
+        index.add_path(std::path::Path::new("new.txt")).unwrap();
+        index.write().unwrap();
+        let entries = get_file_statuses(&tr.repo).unwrap();
+        let staged: Vec<_> = entries.iter().filter(|e| matches!(e.status, FileStatus::Staged(ChangeKind::Added))).collect();
+        assert_eq!(staged.len(), 1);
+        assert_eq!(staged[0].path, "new.txt");
+    }
+
+    #[test]
+    fn test_statuses_staged_modified() {
+        let tr = TestRepo::with_initial_commit();
+        tr.write_file("hello.txt", "modified\n");
+        let mut index = tr.repo.index().unwrap();
+        index.add_path(std::path::Path::new("hello.txt")).unwrap();
+        index.write().unwrap();
+        let entries = get_file_statuses(&tr.repo).unwrap();
+        let staged: Vec<_> = entries.iter().filter(|e| matches!(e.status, FileStatus::Staged(ChangeKind::Modified))).collect();
+        assert_eq!(staged.len(), 1);
+        assert_eq!(staged[0].path, "hello.txt");
+    }
+
+    #[test]
+    fn test_statuses_unstaged_modified() {
+        let tr = TestRepo::with_initial_commit();
+        tr.write_file("hello.txt", "changed\n");
+        let entries = get_file_statuses(&tr.repo).unwrap();
+        let unstaged: Vec<_> = entries.iter().filter(|e| matches!(e.status, FileStatus::Unstaged(ChangeKind::Modified))).collect();
+        assert_eq!(unstaged.len(), 1);
+        assert_eq!(unstaged[0].path, "hello.txt");
+    }
+
+    #[test]
+    fn test_statuses_both_staged_and_unstaged() {
+        let tr = TestRepo::with_initial_commit();
+        // Stage a modification
+        tr.write_file("hello.txt", "staged version\n");
+        let mut index = tr.repo.index().unwrap();
+        index.add_path(std::path::Path::new("hello.txt")).unwrap();
+        index.write().unwrap();
+        // Then modify the workdir again
+        tr.write_file("hello.txt", "unstaged version\n");
+        let entries = get_file_statuses(&tr.repo).unwrap();
+        let hello_entries: Vec<_> = entries.iter().filter(|e| e.path == "hello.txt").collect();
+        assert_eq!(hello_entries.len(), 2);
+        assert!(hello_entries.iter().any(|e| matches!(e.status, FileStatus::Staged(ChangeKind::Modified))));
+        assert!(hello_entries.iter().any(|e| matches!(e.status, FileStatus::Unstaged(ChangeKind::Modified))));
+    }
+
+    #[test]
+    fn test_statuses_deleted() {
+        let tr = TestRepo::with_initial_commit();
+        std::fs::remove_file(tr.workdir().join("hello.txt")).unwrap();
+        let entries = get_file_statuses(&tr.repo).unwrap();
+        let deleted: Vec<_> = entries.iter().filter(|e| matches!(e.status, FileStatus::Unstaged(ChangeKind::Deleted))).collect();
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0].path, "hello.txt");
+    }
+
+    #[test]
+    fn test_statuses_sorted() {
+        let tr = TestRepo::with_initial_commit();
+        // Create untracked file
+        tr.write_file("zzz.txt", "untracked\n");
+        // Create unstaged modification
+        tr.write_file("hello.txt", "changed\n");
+        // Create staged new file
+        tr.write_file("aaa.txt", "staged\n");
+        let mut index = tr.repo.index().unwrap();
+        index.add_path(std::path::Path::new("aaa.txt")).unwrap();
+        index.write().unwrap();
+        let entries = get_file_statuses(&tr.repo).unwrap();
+        // Order: unstaged (hello.txt), untracked (zzz.txt), staged (aaa.txt)
+        assert!(entries[0].status.sort_key() <= entries[1].status.sort_key());
+        assert!(entries[1].status.sort_key() <= entries[2].status.sort_key());
+    }
+
+    #[test]
+    fn test_statuses_diff_stats() {
+        let tr = TestRepo::with_initial_commit();
+        tr.write_file("hello.txt", "hello\nnew line\n");
+        let entries = get_file_statuses(&tr.repo).unwrap();
+        let entry = entries.iter().find(|e| e.path == "hello.txt").unwrap();
+        assert_eq!(entry.insertions, 1);
+        assert_eq!(entry.deletions, 0);
+    }
+}

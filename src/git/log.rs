@@ -243,3 +243,117 @@ fn format_timestamp(secs: i64) -> String {
 fn is_leap(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::test_helpers::TestRepo;
+
+    // ── Pure function tests (no repo) ──
+
+    #[test]
+    fn test_is_leap_common_years() {
+        assert!(!is_leap(1900));
+        assert!(!is_leap(2001));
+        assert!(!is_leap(2100));
+    }
+
+    #[test]
+    fn test_is_leap_leap_years() {
+        assert!(is_leap(2000));
+        assert!(is_leap(2004));
+        assert!(is_leap(2024));
+    }
+
+    #[test]
+    fn test_format_timestamp_epoch() {
+        assert_eq!(format_timestamp(0), "1970-01-01 00:00");
+    }
+
+    #[test]
+    fn test_format_timestamp_known_date() {
+        // 2024-01-01 00:00 UTC
+        assert_eq!(format_timestamp(1704067200), "2024-01-01 00:00");
+    }
+
+    #[test]
+    fn test_format_timestamp_end_of_year() {
+        // 2024-12-31 23:59 UTC
+        assert_eq!(format_timestamp(1735689540), "2024-12-31 23:59");
+    }
+
+    #[test]
+    fn test_format_timestamp_leap_day() {
+        // 2024-02-29 12:00 UTC
+        assert_eq!(format_timestamp(1709208000), "2024-02-29 12:00");
+    }
+
+    #[test]
+    fn test_format_timestamp_march_1_non_leap() {
+        // 2023-03-01 00:00 UTC
+        assert_eq!(format_timestamp(1677628800), "2023-03-01 00:00");
+    }
+
+    #[test]
+    fn test_format_timestamp_negative() {
+        // Pre-1970: documents behavior (may produce unusual output)
+        let result = format_timestamp(-86400);
+        // Just ensure it doesn't panic; the exact output for negative is undefined
+        assert!(!result.is_empty());
+    }
+
+    // ── Repo-based tests ──
+
+    #[test]
+    fn test_get_log_returns_entries() {
+        let tr = TestRepo::with_initial_commit();
+        tr.add_and_commit("hello.txt", "v2\n", "Second commit");
+        tr.add_and_commit("hello.txt", "v3\n", "Third commit");
+        let entries = get_log(&tr.repo, 100).unwrap();
+        assert_eq!(entries.len(), 3);
+        // All messages should be present
+        let messages: Vec<&str> = entries.iter().map(|e| e.message.as_str()).collect();
+        assert!(messages.contains(&"Initial commit"));
+        assert!(messages.contains(&"Second commit"));
+        assert!(messages.contains(&"Third commit"));
+    }
+
+    #[test]
+    fn test_get_log_max_count() {
+        let tr = TestRepo::with_initial_commit();
+        tr.add_and_commit("hello.txt", "v2\n", "Second");
+        tr.add_and_commit("hello.txt", "v3\n", "Third");
+        let entries = get_log(&tr.repo, 2).unwrap();
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_get_log_includes_refs() {
+        let tr = TestRepo::with_initial_commit();
+        let entries = get_log(&tr.repo, 10).unwrap();
+        // The HEAD commit should have the branch name in refs
+        let head_entry = &entries[0];
+        let has_branch_ref = head_entry.refs.iter().any(|r| r == "main" || r == "master");
+        assert!(has_branch_ref, "refs: {:?}", head_entry.refs);
+    }
+
+    #[test]
+    fn test_get_commit_diff_sides() {
+        let tr = TestRepo::with_initial_commit();
+        tr.add_and_commit("hello.txt", "hello\nworld\n", "Add world");
+        let entries = get_log(&tr.repo, 1).unwrap();
+        let result = get_commit_diff_sides(&tr.repo, &entries[0].hash).unwrap();
+        assert!(!result.left_lines.is_empty());
+        assert!(!result.right_lines.is_empty());
+        assert_eq!(result.left_lines.len(), result.right_lines.len());
+    }
+
+    #[test]
+    fn test_get_blame() {
+        let tr = TestRepo::with_initial_commit();
+        let lines = get_blame(&tr.repo, "hello.txt").unwrap();
+        assert_eq!(lines.len(), 1); // "hello\n" is one line
+        assert_eq!(lines[0].hash.len(), 7);
+        assert_eq!(lines[0].author, "Test User");
+    }
+}

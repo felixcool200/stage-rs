@@ -2346,4 +2346,246 @@ end";
         }
         .is_active());
     }
+
+    // ── filtered_entries ──
+
+    fn make_entries(paths: &[&str]) -> Vec<FileEntry> {
+        paths
+            .iter()
+            .map(|p| FileEntry {
+                path: p.to_string(),
+                status: FileStatus::Unstaged(git::ChangeKind::Modified),
+                insertions: 0,
+                deletions: 0,
+            })
+            .collect()
+    }
+
+    fn filtered_paths(app: &App) -> Vec<String> {
+        app.filtered_entries().iter().map(|(_, e)| e.path.clone()).collect()
+    }
+
+    #[test]
+    fn test_filtered_entries_no_filter() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        let mut app = App::new(&tr.path_str()).unwrap();
+        app.file_entries = make_entries(&["a.rs", "b.rs"]);
+        app.file_filter = None;
+        assert_eq!(filtered_paths(&app).len(), 2);
+    }
+
+    #[test]
+    fn test_filtered_entries_single_word() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        let mut app = App::new(&tr.path_str()).unwrap();
+        app.file_entries = make_entries(&["src/main.rs", "src/lib.rs", "Cargo.toml"]);
+        app.file_filter = Some("main".into());
+        assert_eq!(filtered_paths(&app), vec!["src/main.rs"]);
+    }
+
+    #[test]
+    fn test_filtered_entries_multi_word() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        let mut app = App::new(&tr.path_str()).unwrap();
+        app.file_entries = make_entries(&["src/main.rs", "src/lib.rs", "Cargo.toml"]);
+        app.file_filter = Some("src rs".into());
+        let result = filtered_paths(&app);
+        assert!(result.contains(&"src/main.rs".to_string()));
+        assert!(result.contains(&"src/lib.rs".to_string()));
+        assert!(!result.contains(&"Cargo.toml".to_string()));
+    }
+
+    #[test]
+    fn test_filtered_entries_case_insensitive() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        let mut app = App::new(&tr.path_str()).unwrap();
+        app.file_entries = make_entries(&["src/main.rs", "README.md"]);
+        app.file_filter = Some("MAIN".into());
+        assert_eq!(filtered_paths(&app), vec!["src/main.rs"]);
+    }
+
+    #[test]
+    fn test_filtered_entries_empty_filter() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        let mut app = App::new(&tr.path_str()).unwrap();
+        app.file_entries = make_entries(&["a.rs", "b.rs"]);
+        app.file_filter = Some(String::new());
+        assert_eq!(filtered_paths(&app).len(), 2);
+    }
+
+    // ── keep_cursor_visible ──
+
+    fn make_diff_state(viewport_height: usize, scroll: usize, cursor_line: usize) -> DiffState {
+        DiffState {
+            file_path: String::new(),
+            left_lines: Vec::new(),
+            right_lines: Vec::new(),
+            hunks: Vec::new(),
+            current_hunk: 0,
+            scroll,
+            max_scroll: 1000,
+            old_content: String::new(),
+            new_content: String::new(),
+            view_mode: DiffViewMode::LineNav,
+            cursor_line,
+            selected_lines: BTreeSet::new(),
+            hunk_changed_rows: Vec::new(),
+            saved_line_selection: None,
+            viewport_height,
+            is_staged: false,
+        }
+    }
+
+    #[test]
+    fn test_keep_cursor_visible_scrolls_up() {
+        let mut ds = make_diff_state(30, 20, 5);
+        App::keep_cursor_visible(&mut ds);
+        // Cursor at 5 is above scroll(20) + margin(10), scroll should decrease
+        assert!(ds.scroll <= 5);
+    }
+
+    #[test]
+    fn test_keep_cursor_visible_scrolls_down() {
+        let mut ds = make_diff_state(30, 0, 29);
+        App::keep_cursor_visible(&mut ds);
+        // Cursor at 29 is near/past bottom of viewport(0..30), scroll should increase
+        assert!(ds.scroll > 0);
+    }
+
+    #[test]
+    fn test_keep_cursor_visible_no_change() {
+        let mut ds = make_diff_state(30, 0, 15);
+        let original_scroll = ds.scroll;
+        App::keep_cursor_visible(&mut ds);
+        assert_eq!(ds.scroll, original_scroll);
+    }
+
+    // ── update_current_hunk_from_scroll / cursor ──
+
+    fn make_diff_state_with_hunks() -> DiffState {
+        let mut ds = make_diff_state(30, 0, 0);
+        ds.hunks = vec![
+            git::Hunk { display_start: 5, display_end: 10 },
+            git::Hunk { display_start: 20, display_end: 25 },
+            git::Hunk { display_start: 40, display_end: 50 },
+        ];
+        ds
+    }
+
+    #[test]
+    fn test_update_current_hunk_from_scroll() {
+        let mut ds = make_diff_state_with_hunks();
+        // With viewport=30, offset=10, scroll=6: focus_line = 6 (since 6 < 10)
+        // focus_line 6 is inside hunk 0 (5..10)
+        ds.scroll = 6;
+        App::update_current_hunk_from_scroll(&mut ds);
+        assert_eq!(ds.current_hunk, 0);
+
+        // scroll=15, offset=10: focus_line = 15+10 = 25, past hunk 1 (20..25), so hunk 2
+        ds.scroll = 15;
+        App::update_current_hunk_from_scroll(&mut ds);
+        assert_eq!(ds.current_hunk, 2);
+    }
+
+    #[test]
+    fn test_update_current_hunk_from_cursor() {
+        let mut ds = make_diff_state_with_hunks();
+        ds.cursor_line = 42;
+        App::update_current_hunk_from_cursor(&mut ds);
+        assert_eq!(ds.current_hunk, 2);
+    }
+
+    #[test]
+    fn test_update_current_hunk_past_all() {
+        let mut ds = make_diff_state_with_hunks();
+        ds.scroll = 100;
+        App::update_current_hunk_from_scroll(&mut ds);
+        assert_eq!(ds.current_hunk, 2); // last hunk
+    }
+
+    // ── App::update() round-trip tests ──
+
+    #[test]
+    fn test_update_quit_closes_overlay() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        let mut app = App::new(&tr.path_str()).unwrap();
+        app.overlay = Overlay::Confirm {
+            message: "test".into(),
+            action: PendingAction::UndoLastCommit,
+        };
+        app.update(Message::Quit).unwrap();
+        assert!(!app.overlay.is_active());
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn test_update_quit_exits() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        let mut app = App::new(&tr.path_str()).unwrap();
+        app.update(Message::Quit).unwrap();
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn test_update_stage_file() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        tr.write_file("new.txt", "content\n");
+        let mut app = App::new(&tr.path_str()).unwrap();
+        // Select the untracked file
+        app.header_selected = false;
+        let idx = app.file_entries.iter().position(|e| e.path == "new.txt").unwrap();
+        app.selected_index = idx;
+        app.update(Message::StageFile).unwrap();
+        assert!(app.status_message.as_ref().unwrap().contains("Staged"));
+    }
+
+    #[test]
+    fn test_update_unstage_file() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        tr.write_file("new.txt", "content\n");
+        // Stage it first
+        {
+            let mut index = tr.repo.index().unwrap();
+            index.add_path(std::path::Path::new("new.txt")).unwrap();
+            index.write().unwrap();
+        }
+        let mut app = App::new(&tr.path_str()).unwrap();
+        app.header_selected = false;
+        let idx = app.file_entries.iter().position(|e| e.path == "new.txt").unwrap();
+        app.selected_index = idx;
+        app.update(Message::UnstageFile).unwrap();
+        assert!(app.status_message.as_ref().unwrap().contains("Unstaged"));
+    }
+
+    #[test]
+    fn test_update_open_commit_no_staged() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        let mut app = App::new(&tr.path_str()).unwrap();
+        app.update(Message::OpenCommit).unwrap();
+        assert_eq!(app.status_message.as_deref(), Some("Nothing staged to commit"));
+    }
+
+    #[test]
+    fn test_update_switch_panel() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        tr.write_file("hello.txt", "changed\n");
+        let mut app = App::new(&tr.path_str()).unwrap();
+        app.header_selected = false;
+        assert_eq!(app.active_panel, Panel::FileList);
+        app.update(Message::SwitchPanel).unwrap();
+        assert_eq!(app.active_panel, Panel::DiffView);
+        app.update(Message::SwitchPanel).unwrap();
+        assert_eq!(app.active_panel, Panel::FileList);
+    }
+
+    #[test]
+    fn test_update_start_and_clear_filter() {
+        let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
+        let mut app = App::new(&tr.path_str()).unwrap();
+        assert!(app.file_filter.is_none());
+        app.update(Message::StartFilter).unwrap();
+        assert_eq!(app.file_filter, Some(String::new()));
+        app.update(Message::ClearFilter).unwrap();
+        assert!(app.file_filter.is_none());
+    }
 }

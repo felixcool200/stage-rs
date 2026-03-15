@@ -2,6 +2,8 @@ mod diff;
 mod log;
 mod operations;
 mod status;
+#[cfg(test)]
+pub(crate) mod test_helpers;
 
 use color_eyre::Result;
 use git2::Repository;
@@ -11,6 +13,8 @@ pub use diff::{apply_hunk, apply_lines, changed_rows_in_hunk, compute_diff, Diff
 pub use log::{BlameLine, CommitDiffResult, LogEntry};
 pub use operations::{BranchEntry, StashEntry};
 pub use status::{FileEntry, FileStatus};
+#[cfg(test)]
+pub use status::ChangeKind;
 
 pub struct GitRepo {
     pub repo: Repository,

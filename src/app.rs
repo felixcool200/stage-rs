@@ -47,6 +47,8 @@ pub struct App {
     pub highlighter: Highlighter,
     /// UI color theme
     pub theme: Theme,
+    /// Terminal height in rows (updated each frame by main loop)
+    pub term_height: usize,
 }
 
 pub struct EditorRequest {
@@ -312,6 +314,7 @@ impl App {
             conflict_state: None,
             highlighter,
             theme,
+            term_height: 24,
         };
         // Load diff for the initially selected file
         if !app.file_entries.is_empty() {
@@ -1496,8 +1499,14 @@ impl App {
                         } else {
                             unreachable!()
                         };
-                        let initial_scroll =
-                            result.hunks.first().map(|h| h.display_start).unwrap_or(0);
+                        let viewport =
+                            (self.term_height * 80 / 100).saturating_sub(2);
+                        let offset = viewport / 3;
+                        let initial_scroll = result
+                            .hunks
+                            .first()
+                            .map(|h| h.display_start.saturating_sub(offset))
+                            .unwrap_or(0);
                         self.overlay = Overlay::CommitDetail {
                             hash,
                             message,
@@ -1507,7 +1516,7 @@ impl App {
                             current_hunk: 0,
                             file_extensions: result.file_extensions,
                             scroll: initial_scroll,
-                            viewport_height: 0,
+                            viewport_height: viewport,
                             log_entries,
                             log_selected: selected,
                         };
@@ -1549,7 +1558,14 @@ impl App {
                     } else {
                         unreachable!()
                     };
-                    let initial_scroll = result.hunks.first().map(|h| h.display_start).unwrap_or(0);
+                    let viewport =
+                        (self.term_height * 80 / 100).saturating_sub(2);
+                    let offset = viewport / 3;
+                    let initial_scroll = result
+                        .hunks
+                        .first()
+                        .map(|h| h.display_start.saturating_sub(offset))
+                        .unwrap_or(0);
                     self.overlay = Overlay::CommitDetail {
                         hash,
                         message,
@@ -1559,7 +1575,7 @@ impl App {
                         current_hunk: 0,
                         file_extensions: result.file_extensions,
                         scroll: initial_scroll,
-                        viewport_height: 0,
+                        viewport_height: viewport,
                         log_entries,
                         log_selected: new_idx,
                     };

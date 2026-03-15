@@ -70,6 +70,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     loop {
         // Update viewport height for scroll centering
         let term_height = terminal.size()?.height as usize;
+        app.term_height = term_height;
         if let Some(ds) = &mut app.diff_state {
             // body height = term_height - header(1) - footer(1), each diff panel has 2 border rows
             ds.viewport_height = term_height.saturating_sub(4);

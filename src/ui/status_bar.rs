@@ -1,4 +1,5 @@
 use crate::app::{App, DiffViewMode, Panel};
+use crate::keymap::{self, InputContext};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -104,17 +105,13 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         ));
     }
 
-    let nav_hint = match (app.active_panel, in_line_mode) {
-        (Panel::FileList, _) => " | ↑/↓:navigate Enter:select Tab:diff Space:commands ",
-        (Panel::DiffView, false) => {
-            " | ↑/↓:scroll Shift+↑/↓:hunks Enter:lines Tab:files Space:commands "
-        }
-        (Panel::DiffView, true) => " | ↑/↓:lines Enter:toggle Esc:back Space:commands ",
+    let ctx = match (app.active_panel, in_line_mode) {
+        (Panel::FileList, _) => InputContext::FileList,
+        (Panel::DiffView, false) => InputContext::DiffHunkNav,
+        (Panel::DiffView, true) => InputContext::DiffLineNav,
     };
-    spans.push(Span::styled(
-        nav_hint,
-        Style::default().fg(app.theme.fg_dim),
-    ));
+    spans.push(Span::styled(" | ", Style::default().fg(app.theme.fg_dim)));
+    spans.extend(keymap::hint_line(ctx, &app.theme).spans);
 
     frame.render_widget(
         Paragraph::new(Line::from(spans)).style(Style::default().bg(app.theme.bg)),

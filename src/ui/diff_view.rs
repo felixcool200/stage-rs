@@ -1,5 +1,6 @@
 use crate::app::{App, ConflictResolution, ConflictState, DiffState, DiffViewMode, Panel};
 use crate::git::DiffLineKind;
+use crate::keymap::{self, InputContext};
 use crate::syntax;
 use crate::theme::Theme;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -276,11 +277,14 @@ fn render_conflict(
                 .bg(res_color)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            "  Space:actions  ↑/↓:navigate  ←/Esc:back ".to_string(),
-            Style::default().fg(theme.fg_dim),
-        ),
+        Span::styled("  ", Style::default()),
     ]);
+    let hint = keymap::hint_line(InputContext::ConflictNav, theme);
+    let top_line = {
+        let mut spans = top_line.spans;
+        spans.extend(hint.spans);
+        Line::from(spans)
+    };
     let status_area = Rect { height: 1, ..area };
     frame.render_widget(Paragraph::new(top_line), status_area);
 

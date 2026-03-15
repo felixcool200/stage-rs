@@ -216,7 +216,7 @@ fn poll_which_key(app: &mut App) -> Result<Option<app::Message>> {
 
     if let crossterm::event::KeyCode::Char(ch) = key.code {
         if let Some(entry) = entries.iter().find(|e| e.key == ch) {
-            return Ok(Some(entry.message.clone()));
+            return Ok(Some(entry.message));
         }
     }
 

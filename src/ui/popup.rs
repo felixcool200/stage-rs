@@ -1,4 +1,5 @@
 use crate::app::{App, Overlay, WhichKeyEntry};
+use crate::keymap::{self, InputContext};
 use crate::theme::Theme;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -70,24 +71,12 @@ fn render_confirm(frame: &mut Frame, message: &str, theme: &Theme) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    let hint = keymap::hint_line(InputContext::Confirm, theme);
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(message, Style::default().fg(theme.fg))),
         Line::from(""),
-        Line::from(vec![
-            Span::styled(
-                " [y/Enter] ",
-                Style::default()
-                    .fg(theme.green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("Yes  ", Style::default().fg(theme.fg_dim)),
-            Span::styled(
-                " [n/Esc] ",
-                Style::default().fg(theme.red).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("No", Style::default().fg(theme.fg_dim)),
-        ]),
+        hint,
     ];
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
@@ -120,37 +109,7 @@ fn render_dirty_checkout(frame: &mut Frame, branch: &str, has_conflicts: bool, t
         Line::from(""),
     ];
 
-    if has_conflicts {
-        lines.push(Line::from(Span::styled(
-            " Stash unavailable (unmerged files)",
-            Style::default().fg(theme.fg_dim),
-        )));
-    } else {
-        lines.push(Line::from(vec![
-            Span::styled(
-                " [s] ",
-                Style::default().fg(theme.cyan).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("Stash & switch", Style::default().fg(theme.fg_dim)),
-        ]));
-    }
-
-    lines.push(Line::from(vec![
-        Span::styled(
-            " [d] ",
-            Style::default().fg(theme.red).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Discard & switch", Style::default().fg(theme.fg_dim)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled(
-            " [Esc] ",
-            Style::default()
-                .fg(theme.fg_dim)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Cancel", Style::default().fg(theme.fg_dim)),
-    ]));
+    lines.extend(keymap::dirty_checkout_hint_line(has_conflicts, theme));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, inner);
@@ -158,7 +117,7 @@ fn render_dirty_checkout(frame: &mut Frame, branch: &str, has_conflicts: bool, t
 
 fn render_commit_input(
     frame: &mut Frame,
-    input: &crate::app::TextInput,
+    input: &crate::text_input::TextInput,
     amend: bool,
     theme: &Theme,
 ) {
@@ -219,14 +178,13 @@ fn render_commit_input(
         y: cursor_y,
     });
 
-    // Fixed hint at bottom
-    let hint_lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            " Ctrl+S: commit  Esc: cancel  Enter: new line ",
-            Style::default().fg(theme.fg_dim),
-        )),
-    ];
+    // Fixed hint at bottom (derived from keymap + Enter:new line which is text-input specific)
+    let mut hint_spans = vec![Span::styled(" ", Style::default())];
+    hint_spans.extend(keymap::hint_line(InputContext::CommitInput, theme).spans);
+    hint_spans.push(Span::styled("  ", Style::default()));
+    hint_spans.push(Span::styled("Enter", Style::default().fg(theme.yellow)));
+    hint_spans.push(Span::styled(":new line", Style::default().fg(theme.fg_dim)));
+    let hint_lines = vec![Line::from(""), Line::from(hint_spans)];
     frame.render_widget(Paragraph::new(hint_lines), hint_area);
 }
 
@@ -242,16 +200,7 @@ fn render_git_log(
 
     let block = Block::default()
         .title(format!(" Git Log ({} commits) ", entries.len()))
-        .title_bottom(Line::from(vec![
-            Span::styled(" y", Style::default().fg(theme.yellow)),
-            Span::styled(":yank hash  ", Style::default().fg(theme.fg_dim)),
-            Span::styled("Enter", Style::default().fg(theme.yellow)),
-            Span::styled(":view  ", Style::default().fg(theme.fg_dim)),
-            Span::styled("r", Style::default().fg(theme.yellow)),
-            Span::styled(":rebase  ", Style::default().fg(theme.fg_dim)),
-            Span::styled("q/Esc", Style::default().fg(theme.yellow)),
-            Span::styled(":close ", Style::default().fg(theme.fg_dim)),
-        ]))
+        .title_bottom(keymap::hint_line(InputContext::GitLog, theme))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.cyan))
         .style(Style::default().bg(theme.bg));
@@ -301,10 +250,13 @@ fn render_branch_list(
     let area = centered_rect(60, 60, frame.area());
     frame.render_widget(Clear, area);
 
-    let title = if creating.is_some() {
-        " New Branch (Enter to create, Esc to cancel) "
+    let title: Line = if creating.is_some() {
+        Line::from(" New Branch (Enter to create, Esc to cancel) ")
     } else {
-        " Branches [Enter]checkout [n]ew [q]close "
+        let mut spans = vec![Span::from(" Branches ")];
+        spans.extend(keymap::hint_line(InputContext::BranchList, theme).spans);
+        spans.push(Span::from(" "));
+        Line::from(spans)
     };
 
     let block = Block::default()
@@ -408,25 +360,21 @@ fn render_commit_detail(app: &App, frame: &mut Frame) {
         format!(" hunk {}/{}", current_hunk + 1, hunks.len())
     };
 
+    // Build bottom hint: keymap hints + dynamic hunk info
+    let mut bottom_spans = vec![Span::from(" ")];
+    bottom_spans.extend(keymap::hint_line(InputContext::CommitDetail, theme).spans);
+    if !hunk_info.is_empty() {
+        bottom_spans.push(Span::styled(hunk_info, Style::default().fg(theme.fg_dim)));
+    }
+    bottom_spans.push(Span::from(" "));
+
     let block = Block::default()
         .title(format!(
             " [{}/{}] {hash}{refs_str} - {message} ",
             log_index + 1,
             log_total
         ))
-        .title_bottom(Line::from(vec![
-            Span::styled(" Ctrl+↑/↓", Style::default().fg(theme.yellow)),
-            Span::styled(":prev/next commit  ", Style::default().fg(theme.fg_dim)),
-            Span::styled("↑/↓", Style::default().fg(theme.yellow)),
-            Span::styled(":hunk  ", Style::default().fg(theme.fg_dim)),
-            Span::styled("Shift+↑/↓", Style::default().fg(theme.yellow)),
-            Span::styled(":scroll  ", Style::default().fg(theme.fg_dim)),
-            Span::styled("q/Esc", Style::default().fg(theme.yellow)),
-            Span::styled(
-                format!(":close{hunk_info} "),
-                Style::default().fg(theme.fg_dim),
-            ),
-        ]))
+        .title_bottom(Line::from(bottom_spans))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.yellow))
         .style(Style::default().bg(theme.bg));
@@ -523,8 +471,12 @@ fn render_rebase(
     let area = centered_rect(75, 60, frame.area());
     frame.render_widget(Clear, area);
 
+    let mut title_spans = vec![Span::from(" Interactive Rebase ")];
+    title_spans.extend(keymap::hint_line(InputContext::Rebase, theme).spans);
+    title_spans.push(Span::from(" "));
+
     let block = Block::default()
-        .title(" Interactive Rebase [Space]cycle [Shift+↑/↓]reorder [Enter]execute [q]cancel ")
+        .title(Line::from(title_spans))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.magenta))
         .style(Style::default().bg(theme.bg));
@@ -570,11 +522,12 @@ fn render_stash_list(
     let area = centered_rect(70, 50, frame.area());
     frame.render_widget(Clear, area);
 
+    let mut title_spans = vec![Span::from(format!(" Stashes ({}) ", entries.len()))];
+    title_spans.extend(keymap::hint_line(InputContext::StashList, theme).spans);
+    title_spans.push(Span::from(" "));
+
     let block = Block::default()
-        .title(format!(
-            " Stashes ({}) [p]op [a]pply [d]rop [q]close ",
-            entries.len()
-        ))
+        .title(Line::from(title_spans))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.magenta))
         .style(Style::default().bg(theme.bg));

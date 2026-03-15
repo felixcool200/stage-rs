@@ -202,7 +202,7 @@ pub struct WhichKeyEntry {
     pub message: Message,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Message {
     MoveUp,
     MoveDown,
@@ -1549,8 +1549,7 @@ impl App {
                     } else {
                         unreachable!()
                     };
-                    let initial_scroll =
-                        result.hunks.first().map(|h| h.display_start).unwrap_or(0);
+                    let initial_scroll = result.hunks.first().map(|h| h.display_start).unwrap_or(0);
                     self.overlay = Overlay::CommitDetail {
                         hash,
                         message,

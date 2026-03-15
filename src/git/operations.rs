@@ -132,7 +132,14 @@ pub fn commit_amend(repo: &Repository, message: &str) -> Result<String> {
     let tree_oid = index.write_tree()?;
     let tree = repo.find_tree(tree_oid)?;
 
-    let oid = head_commit.amend(Some("HEAD"), Some(&sig), Some(&sig), None, Some(message), Some(&tree))?;
+    let oid = head_commit.amend(
+        Some("HEAD"),
+        Some(&sig),
+        Some(&sig),
+        None,
+        Some(message),
+        Some(&tree),
+    )?;
 
     Ok(oid.to_string()[..7].to_string())
 }
@@ -141,21 +148,14 @@ pub fn commit_amend(repo: &Repository, message: &str) -> Result<String> {
 pub fn undo_last_commit(repo: &Repository) -> Result<String> {
     let head = repo.head().map_err(|_| eyre!("No HEAD to undo"))?;
     let head_commit = head.peel_to_commit()?;
-    let message = head_commit
-        .message()
-        .unwrap_or("")
-        .to_string();
+    let message = head_commit.message().unwrap_or("").to_string();
 
     let parent = head_commit
         .parent(0)
         .map_err(|_| eyre!("Cannot undo initial commit"))?;
 
     // Soft reset: move HEAD to parent, keep index and working tree
-    repo.reset(
-        parent.as_object(),
-        git2::ResetType::Soft,
-        None,
-    )?;
+    repo.reset(parent.as_object(), git2::ResetType::Soft, None)?;
 
     Ok(message)
 }
@@ -230,14 +230,22 @@ pub fn list_branches(repo: &Repository) -> Result<Vec<BranchEntry>> {
         let (branch, _) = b?;
         let name = branch.name()?.unwrap_or("").to_string();
         let is_current = branch.is_head();
-        entries.push(BranchEntry { name, is_current, is_remote: false });
+        entries.push(BranchEntry {
+            name,
+            is_current,
+            is_remote: false,
+        });
     }
     // Also list remote branches
     let remote_branches = repo.branches(Some(git2::BranchType::Remote))?;
     for b in remote_branches {
         let (branch, _) = b?;
         let name = branch.name()?.unwrap_or("").to_string();
-        entries.push(BranchEntry { name, is_current: false, is_remote: true });
+        entries.push(BranchEntry {
+            name,
+            is_current: false,
+            is_remote: true,
+        });
     }
     Ok(entries)
 }
@@ -427,7 +435,14 @@ mod tests {
         tr.add_and_commit("hello.txt", "main\n", "main change");
 
         // Create branch from initial commit
-        let initial = tr.repo.head().unwrap().peel_to_commit().unwrap().parent(0).unwrap();
+        let initial = tr
+            .repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .parent(0)
+            .unwrap();
         tr.repo.branch("feature", &initial, false).unwrap();
         checkout_branch(&tr.repo, "feature").unwrap();
         tr.add_and_commit("other.txt", "feature\n", "feature change");

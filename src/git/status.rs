@@ -85,24 +85,64 @@ pub fn get_file_statuses(repo: &Repository) -> Result<Vec<FileEntry>> {
 
         // Staged changes (index vs HEAD)
         if s.contains(Status::INDEX_NEW) {
-            entries.push(FileEntry { path: path.clone(), status: FileStatus::Staged(ChangeKind::Added), insertions: 0, deletions: 0 });
+            entries.push(FileEntry {
+                path: path.clone(),
+                status: FileStatus::Staged(ChangeKind::Added),
+                insertions: 0,
+                deletions: 0,
+            });
         } else if s.contains(Status::INDEX_MODIFIED) {
-            entries.push(FileEntry { path: path.clone(), status: FileStatus::Staged(ChangeKind::Modified), insertions: 0, deletions: 0 });
+            entries.push(FileEntry {
+                path: path.clone(),
+                status: FileStatus::Staged(ChangeKind::Modified),
+                insertions: 0,
+                deletions: 0,
+            });
         } else if s.contains(Status::INDEX_DELETED) {
-            entries.push(FileEntry { path: path.clone(), status: FileStatus::Staged(ChangeKind::Deleted), insertions: 0, deletions: 0 });
+            entries.push(FileEntry {
+                path: path.clone(),
+                status: FileStatus::Staged(ChangeKind::Deleted),
+                insertions: 0,
+                deletions: 0,
+            });
         } else if s.contains(Status::INDEX_RENAMED) {
-            entries.push(FileEntry { path: path.clone(), status: FileStatus::Staged(ChangeKind::Renamed), insertions: 0, deletions: 0 });
+            entries.push(FileEntry {
+                path: path.clone(),
+                status: FileStatus::Staged(ChangeKind::Renamed),
+                insertions: 0,
+                deletions: 0,
+            });
         }
 
         // Unstaged changes (workdir vs index)
         if s.contains(Status::WT_MODIFIED) {
-            entries.push(FileEntry { path: path.clone(), status: FileStatus::Unstaged(ChangeKind::Modified), insertions: 0, deletions: 0 });
+            entries.push(FileEntry {
+                path: path.clone(),
+                status: FileStatus::Unstaged(ChangeKind::Modified),
+                insertions: 0,
+                deletions: 0,
+            });
         } else if s.contains(Status::WT_DELETED) {
-            entries.push(FileEntry { path: path.clone(), status: FileStatus::Unstaged(ChangeKind::Deleted), insertions: 0, deletions: 0 });
+            entries.push(FileEntry {
+                path: path.clone(),
+                status: FileStatus::Unstaged(ChangeKind::Deleted),
+                insertions: 0,
+                deletions: 0,
+            });
         } else if s.contains(Status::WT_RENAMED) {
-            entries.push(FileEntry { path: path.clone(), status: FileStatus::Unstaged(ChangeKind::Renamed), insertions: 0, deletions: 0 });
+            entries.push(FileEntry {
+                path: path.clone(),
+                status: FileStatus::Unstaged(ChangeKind::Renamed),
+                insertions: 0,
+                deletions: 0,
+            });
         } else if s.contains(Status::WT_NEW) {
-            entries.push(FileEntry { path: path.clone(), status: FileStatus::Untracked, insertions: 0, deletions: 0 });
+            entries.push(FileEntry {
+                path: path.clone(),
+                status: FileStatus::Untracked,
+                insertions: 0,
+                deletions: 0,
+            });
         }
     }
 
@@ -134,14 +174,9 @@ pub fn get_file_statuses(repo: &Repository) -> Result<Vec<FileEntry>> {
 
 fn diff_stats_index_to_head(repo: &Repository) -> HashMap<String, (usize, usize)> {
     let mut map = HashMap::new();
-    let head_tree = repo.head().ok()
-        .and_then(|h| h.peel_to_tree().ok());
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
     let mut opts = DiffOptions::new();
-    let diff = repo.diff_tree_to_index(
-        head_tree.as_ref(),
-        None,
-        Some(&mut opts),
-    );
+    let diff = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts));
     if let Ok(diff) = diff {
         collect_diff_stats(&diff, &mut map);
     }
@@ -162,12 +197,17 @@ fn collect_diff_stats(diff: &git2::Diff, map: &mut HashMap<String, (usize, usize
     let num_deltas = diff.deltas().len();
     for i in 0..num_deltas {
         if let Ok(Some(patch)) = git2::Patch::from_diff(diff, i) {
-            let path = patch.delta().new_file().path()
+            let path = patch
+                .delta()
+                .new_file()
+                .path()
                 .or_else(|| patch.delta().old_file().path())
                 .and_then(|p| p.to_str())
                 .unwrap_or("")
                 .to_string();
-            if path.is_empty() { continue; }
+            if path.is_empty() {
+                continue;
+            }
             let (_, ins, del) = patch.line_stats().unwrap_or((0, 0, 0));
             map.insert(path, (ins, del));
         }
@@ -183,9 +223,16 @@ mod tests {
 
     #[test]
     fn test_sort_key_ordering() {
-        assert!(FileStatus::Conflict.sort_key() < FileStatus::Unstaged(ChangeKind::Modified).sort_key());
-        assert!(FileStatus::Unstaged(ChangeKind::Modified).sort_key() < FileStatus::Untracked.sort_key());
-        assert!(FileStatus::Untracked.sort_key() < FileStatus::Staged(ChangeKind::Modified).sort_key());
+        assert!(
+            FileStatus::Conflict.sort_key() < FileStatus::Unstaged(ChangeKind::Modified).sort_key()
+        );
+        assert!(
+            FileStatus::Unstaged(ChangeKind::Modified).sort_key()
+                < FileStatus::Untracked.sort_key()
+        );
+        assert!(
+            FileStatus::Untracked.sort_key() < FileStatus::Staged(ChangeKind::Modified).sort_key()
+        );
     }
 
     #[test]
@@ -201,9 +248,15 @@ mod tests {
     #[test]
     fn test_section_name_all_variants() {
         assert_eq!(FileStatus::Conflict.section_name(), "Merge Conflicts");
-        assert_eq!(FileStatus::Unstaged(ChangeKind::Modified).section_name(), "Changes");
+        assert_eq!(
+            FileStatus::Unstaged(ChangeKind::Modified).section_name(),
+            "Changes"
+        );
         assert_eq!(FileStatus::Untracked.section_name(), "Untracked");
-        assert_eq!(FileStatus::Staged(ChangeKind::Added).section_name(), "Staged Changes");
+        assert_eq!(
+            FileStatus::Staged(ChangeKind::Added).section_name(),
+            "Staged Changes"
+        );
     }
 
     // ── Repo-based tests ──
@@ -226,7 +279,10 @@ mod tests {
         index.add_path(std::path::Path::new("new.txt")).unwrap();
         index.write().unwrap();
         let entries = get_file_statuses(&tr.repo).unwrap();
-        let staged: Vec<_> = entries.iter().filter(|e| matches!(e.status, FileStatus::Staged(ChangeKind::Added))).collect();
+        let staged: Vec<_> = entries
+            .iter()
+            .filter(|e| matches!(e.status, FileStatus::Staged(ChangeKind::Added)))
+            .collect();
         assert_eq!(staged.len(), 1);
         assert_eq!(staged[0].path, "new.txt");
     }
@@ -239,7 +295,10 @@ mod tests {
         index.add_path(std::path::Path::new("hello.txt")).unwrap();
         index.write().unwrap();
         let entries = get_file_statuses(&tr.repo).unwrap();
-        let staged: Vec<_> = entries.iter().filter(|e| matches!(e.status, FileStatus::Staged(ChangeKind::Modified))).collect();
+        let staged: Vec<_> = entries
+            .iter()
+            .filter(|e| matches!(e.status, FileStatus::Staged(ChangeKind::Modified)))
+            .collect();
         assert_eq!(staged.len(), 1);
         assert_eq!(staged[0].path, "hello.txt");
     }
@@ -249,7 +308,10 @@ mod tests {
         let tr = TestRepo::with_initial_commit();
         tr.write_file("hello.txt", "changed\n");
         let entries = get_file_statuses(&tr.repo).unwrap();
-        let unstaged: Vec<_> = entries.iter().filter(|e| matches!(e.status, FileStatus::Unstaged(ChangeKind::Modified))).collect();
+        let unstaged: Vec<_> = entries
+            .iter()
+            .filter(|e| matches!(e.status, FileStatus::Unstaged(ChangeKind::Modified)))
+            .collect();
         assert_eq!(unstaged.len(), 1);
         assert_eq!(unstaged[0].path, "hello.txt");
     }
@@ -267,8 +329,12 @@ mod tests {
         let entries = get_file_statuses(&tr.repo).unwrap();
         let hello_entries: Vec<_> = entries.iter().filter(|e| e.path == "hello.txt").collect();
         assert_eq!(hello_entries.len(), 2);
-        assert!(hello_entries.iter().any(|e| matches!(e.status, FileStatus::Staged(ChangeKind::Modified))));
-        assert!(hello_entries.iter().any(|e| matches!(e.status, FileStatus::Unstaged(ChangeKind::Modified))));
+        assert!(hello_entries
+            .iter()
+            .any(|e| matches!(e.status, FileStatus::Staged(ChangeKind::Modified))));
+        assert!(hello_entries
+            .iter()
+            .any(|e| matches!(e.status, FileStatus::Unstaged(ChangeKind::Modified))));
     }
 
     #[test]
@@ -276,7 +342,10 @@ mod tests {
         let tr = TestRepo::with_initial_commit();
         std::fs::remove_file(tr.workdir().join("hello.txt")).unwrap();
         let entries = get_file_statuses(&tr.repo).unwrap();
-        let deleted: Vec<_> = entries.iter().filter(|e| matches!(e.status, FileStatus::Unstaged(ChangeKind::Deleted))).collect();
+        let deleted: Vec<_> = entries
+            .iter()
+            .filter(|e| matches!(e.status, FileStatus::Unstaged(ChangeKind::Deleted)))
+            .collect();
         assert_eq!(deleted.len(), 1);
         assert_eq!(deleted[0].path, "hello.txt");
     }

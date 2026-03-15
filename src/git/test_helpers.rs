@@ -48,11 +48,7 @@ impl TestRepo {
         let tree_oid = index.write_tree().unwrap();
         let tree = self.repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("Test User", "test@example.com").unwrap();
-        let parent = self
-            .repo
-            .head()
-            .ok()
-            .and_then(|h| h.peel_to_commit().ok());
+        let parent = self.repo.head().ok().and_then(|h| h.peel_to_commit().ok());
         let parents: Vec<&git2::Commit> = parent.iter().collect();
         self.repo
             .commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)

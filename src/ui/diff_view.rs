@@ -25,21 +25,28 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
     let visible_height = area.height.saturating_sub(2) as usize;
     let is_focused = app.active_panel == Panel::DiffView;
 
-    let blame_data = if app.show_blame { app.blame_data.as_deref() } else { None };
+    let blame_data = if app.show_blame {
+        app.blame_data.as_deref()
+    } else {
+        None
+    };
 
     // Build a map from display line index to old-file line index for blame
     let blame_map: Vec<Option<usize>> = if blame_data.is_some() {
         let mut file_line = 0usize;
-        ds.left_lines.iter().map(|dl| {
-            match dl.kind {
-                DiffLineKind::Equal | DiffLineKind::Removed => {
-                    let idx = file_line;
-                    file_line += 1;
-                    Some(idx)
+        ds.left_lines
+            .iter()
+            .map(|dl| {
+                match dl.kind {
+                    DiffLineKind::Equal | DiffLineKind::Removed => {
+                        let idx = file_line;
+                        file_line += 1;
+                        Some(idx)
+                    }
+                    _ => None, // Spacer lines have no blame
                 }
-                _ => None, // Spacer lines have no blame
-            }
-        }).collect()
+            })
+            .collect()
     } else {
         Vec::new()
     };
@@ -59,7 +66,10 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
 
             // Show blame annotation if enabled
             if let Some(blame) = blame_data {
-                let blame_line = blame_map.get(i).copied().flatten()
+                let blame_line = blame_map
+                    .get(i)
+                    .copied()
+                    .flatten()
                     .and_then(|fi| blame.get(fi));
                 if let Some(bl) = blame_line {
                     let annotation = format!("{} {:>8} ", bl.hash, truncate_str(&bl.author, 8));
@@ -97,15 +107,15 @@ pub fn render_right(app: &App, frame: &mut Frame, area: Rect) {
 fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
     let theme = &app.theme;
     let is_focused = app.active_panel == Panel::DiffView;
-    let border_color = if is_focused {
-        theme.cyan
-    } else {
-        theme.fg_dim
-    };
+    let border_color = if is_focused { theme.cyan } else { theme.fg_dim };
 
     let title = match &app.diff_state {
         Some(ds) => {
-            let panel_label = if ds.is_staged { "Index" } else { "Working Tree" };
+            let panel_label = if ds.is_staged {
+                "Index"
+            } else {
+                "Working Tree"
+            };
             let mode_info = match ds.view_mode {
                 DiffViewMode::HunkNav if !ds.hunks.is_empty() => {
                     format!(" [hunk {}/{}]", ds.current_hunk + 1, ds.hunks.len())
@@ -113,9 +123,16 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
                 DiffViewMode::LineNav => {
                     let sel = ds.selected_lines.len();
                     let total = ds.hunk_changed_rows.len();
-                    let verb = if ds.is_staged { "to unstage" } else { "selected" };
-                    format!(" [{sel}/{total} {verb} | hunk {}/{}]",
-                            ds.current_hunk + 1, ds.hunks.len())
+                    let verb = if ds.is_staged {
+                        "to unstage"
+                    } else {
+                        "selected"
+                    };
+                    format!(
+                        " [{sel}/{total} {verb} | hunk {}/{}]",
+                        ds.current_hunk + 1,
+                        ds.hunks.len()
+                    )
                 }
                 _ => String::new(),
             };
@@ -161,16 +178,20 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
         .collect();
 
     // Split area: main diff content + 1-col overview bar on the right
-    let [main_area, bar_area] = Layout::horizontal([
-        Constraint::Fill(1),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+    let [main_area, bar_area] =
+        Layout::horizontal([Constraint::Fill(1), Constraint::Length(1)]).areas(area);
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, main_area);
 
-    super::overview_bar::render(frame, &ds.right_lines, ds.scroll, bar_area.height as usize, bar_area, theme);
+    super::overview_bar::render(
+        frame,
+        &ds.right_lines,
+        ds.scroll,
+        bar_area.height as usize,
+        bar_area,
+        theme,
+    );
 }
 
 #[derive(PartialEq, Eq)]
@@ -194,7 +215,11 @@ fn get_line_highlight(
     match ds.view_mode {
         DiffViewMode::LineNav => {
             if ds.selected_lines.contains(&display_row) {
-                if ds.is_staged { LineHighlight::SelectedUnstage } else { LineHighlight::SelectedStage }
+                if ds.is_staged {
+                    LineHighlight::SelectedUnstage
+                } else {
+                    LineHighlight::SelectedStage
+                }
             } else if display_row == ds.cursor_line {
                 LineHighlight::CursorLine
             } else {
@@ -218,7 +243,13 @@ fn get_line_highlight(
     }
 }
 
-fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: Rect, theme: &Theme) {
+fn render_conflict(
+    frame: &mut Frame,
+    cs: &ConflictState,
+    focused: bool,
+    area: Rect,
+    theme: &Theme,
+) {
     let section = &cs.sections[cs.current_section];
 
     let (res_label, res_color) = match section.resolution {
@@ -259,39 +290,65 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
         height: area.height.saturating_sub(1),
         ..area
     };
-    let halves = Layout::horizontal([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ]).split(panels_area);
+    let halves = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(panels_area);
 
-    let left_selected = matches!(section.resolution, ConflictResolution::Ours | ConflictResolution::Both);
-    let right_selected = matches!(section.resolution, ConflictResolution::Theirs | ConflictResolution::Both);
+    let left_selected = matches!(
+        section.resolution,
+        ConflictResolution::Ours | ConflictResolution::Both
+    );
+    let right_selected = matches!(
+        section.resolution,
+        ConflictResolution::Theirs | ConflictResolution::Both
+    );
 
     // Colors depend on focus: bright when focused, dim when viewing from file list
     let (left_fg, left_border, left_bg) = if left_selected {
         (theme.cyan, theme.cyan, theme.conflict_ours_bg)
     } else if focused {
-        (theme.conflict_dim_fg, theme.conflict_dim_border, theme.conflict_dim_bg)
+        (
+            theme.conflict_dim_fg,
+            theme.conflict_dim_border,
+            theme.conflict_dim_bg,
+        )
     } else {
         (theme.fg_dim, theme.fg_dim, theme.bg)
     };
 
     let (right_fg, right_border, right_bg) = if right_selected {
-        (theme.conflict_theirs_accent, theme.conflict_theirs_accent, theme.conflict_theirs_bg)
+        (
+            theme.conflict_theirs_accent,
+            theme.conflict_theirs_accent,
+            theme.conflict_theirs_bg,
+        )
     } else if focused {
-        (theme.conflict_dim_fg, theme.conflict_dim_border, theme.conflict_dim_bg)
+        (
+            theme.conflict_dim_fg,
+            theme.conflict_dim_border,
+            theme.conflict_dim_bg,
+        )
     } else {
         (theme.fg_dim, theme.fg_dim, theme.bg)
     };
 
-    let left_title_fg = if focused || left_selected { theme.cyan } else { theme.fg_dim };
-    let right_title_fg = if focused || right_selected { theme.magenta } else { theme.fg_dim };
+    let left_title_fg = if focused || left_selected {
+        theme.cyan
+    } else {
+        theme.fg_dim
+    };
+    let right_title_fg = if focused || right_selected {
+        theme.magenta
+    } else {
+        theme.fg_dim
+    };
 
     // Left panel (ours / left branch)
     let left_block = Block::default()
         .title(Span::styled(
             format!(" {} ", cs.left_name),
-            Style::default().fg(left_title_fg).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(left_title_fg)
+                .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(left_border))
@@ -343,7 +400,9 @@ fn render_conflict(frame: &mut Frame, cs: &ConflictState, focused: bool, area: R
     let right_block = Block::default()
         .title(Span::styled(
             format!(" {} ", cs.right_name),
-            Style::default().fg(right_title_fg).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(right_title_fg)
+                .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(right_border))
@@ -439,7 +498,11 @@ fn line_styles(kind: &DiffLineKind, highlight: &LineHighlight, theme: &Theme) ->
                 Style::default()
                     .fg(if is_unstage { theme.red } else { theme.green })
                     .bg(if is_unstage {
-                        if change_bg_boost { theme.diff_removed_bg_bright } else { theme.diff_removed_bg }
+                        if change_bg_boost {
+                            theme.diff_removed_bg_bright
+                        } else {
+                            theme.diff_removed_bg
+                        }
                     } else if change_bg_boost {
                         theme.diff_added_bg_bright
                     } else {
@@ -478,9 +541,7 @@ fn line_mode_marker(ds: &DiffState, row: usize, theme: &Theme) -> Span<'static> 
         ),
         (false, true) => Span::styled(
             format!(" {mark}"),
-            Style::default()
-                .fg(mark_color)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(mark_color).add_modifier(Modifier::BOLD),
         ),
         (false, false) => Span::styled("  ", Style::default()),
     }

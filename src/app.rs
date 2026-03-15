@@ -1,9 +1,18 @@
-use crate::git::{self, BlameLine, BranchEntry, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LogEntry, StashEntry};
+use crate::clipboard::copy_to_clipboard;
+use crate::conflict::parse_conflicts;
+use crate::git::{
+    self, BlameLine, BranchEntry, DiffLine, FileEntry, FileStatus, GitRepo, Hunk, LogEntry,
+    StashEntry,
+};
 use crate::syntax::Highlighter;
 use crate::theme::Theme;
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::Result;
 use std::collections::BTreeSet;
 use std::time::Instant;
+
+// Re-export for other modules that import from crate::app
+pub use crate::conflict::{ConflictResolution, ConflictState};
+pub use crate::text_input::TextInput;
 
 pub struct App {
     pub repo: GitRepo,
@@ -38,35 +47,6 @@ pub struct App {
     pub highlighter: Highlighter,
     /// UI color theme
     pub theme: Theme,
-}
-
-pub struct ConflictState {
-    pub file_path: String,
-    pub sections: Vec<ConflictSection>,
-    pub current_section: usize,
-    /// Lines before first conflict
-    pub prefix: Vec<String>,
-    /// Branch name from <<<<<<< marker (e.g. "HEAD" or "master")
-    pub left_name: String,
-    /// Branch name from >>>>>>> marker (e.g. "feature-branch")
-    pub right_name: String,
-}
-
-#[derive(Clone)]
-pub struct ConflictSection {
-    pub ours: Vec<String>,
-    pub theirs: Vec<String>,
-    pub resolution: ConflictResolution,
-    /// Lines between this conflict and the next
-    pub suffix: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ConflictResolution {
-    Unresolved,
-    Ours,
-    Theirs,
-    Both,
 }
 
 pub struct EditorRequest {
@@ -209,143 +189,6 @@ impl Overlay {
     pub fn is_active(&self) -> bool {
         !matches!(self, Overlay::None)
     }
-}
-
-// ── TextInput ────────────────────────────────────────────────────────────────
-
-pub struct TextInput {
-    pub lines: Vec<String>,
-    pub cursor_row: usize,
-    pub cursor_col: usize,
-}
-
-impl TextInput {
-    pub fn new(initial: &str) -> Self {
-        let lines: Vec<String> = if initial.is_empty() {
-            vec![String::new()]
-        } else {
-            initial.lines().map(String::from).collect()
-        };
-        let cursor_row = lines.len().saturating_sub(1);
-        let cursor_col = lines.last().map(|l| l.len()).unwrap_or(0);
-        Self {
-            lines,
-            cursor_row,
-            cursor_col,
-        }
-    }
-
-    pub fn insert_char(&mut self, ch: char) {
-        let line = &mut self.lines[self.cursor_row];
-        let byte_idx = char_to_byte_idx(line, self.cursor_col);
-        line.insert(byte_idx, ch);
-        self.cursor_col += 1;
-    }
-
-    pub fn insert_newline(&mut self) {
-        let line = &mut self.lines[self.cursor_row];
-        let byte_idx = char_to_byte_idx(line, self.cursor_col);
-        let rest = line[byte_idx..].to_string();
-        line.truncate(byte_idx);
-        self.cursor_row += 1;
-        self.cursor_col = 0;
-        self.lines.insert(self.cursor_row, rest);
-    }
-
-    pub fn backspace(&mut self) {
-        if self.cursor_col > 0 {
-            let line = &mut self.lines[self.cursor_row];
-            let byte_idx = char_to_byte_idx(line, self.cursor_col - 1);
-            let end_idx = char_to_byte_idx(line, self.cursor_col);
-            line.replace_range(byte_idx..end_idx, "");
-            self.cursor_col -= 1;
-        } else if self.cursor_row > 0 {
-            let removed = self.lines.remove(self.cursor_row);
-            self.cursor_row -= 1;
-            self.cursor_col = self.lines[self.cursor_row].chars().count();
-            self.lines[self.cursor_row].push_str(&removed);
-        }
-    }
-
-    pub fn move_left(&mut self) {
-        if self.cursor_col > 0 {
-            self.cursor_col -= 1;
-        }
-    }
-
-    pub fn move_right(&mut self) {
-        let len = self.lines[self.cursor_row].chars().count();
-        if self.cursor_col < len {
-            self.cursor_col += 1;
-        }
-    }
-
-    pub fn move_up(&mut self) {
-        if self.cursor_row > 0 {
-            self.cursor_row -= 1;
-            let len = self.lines[self.cursor_row].chars().count();
-            self.cursor_col = self.cursor_col.min(len);
-        }
-    }
-
-    pub fn move_down(&mut self) {
-        if self.cursor_row < self.lines.len() - 1 {
-            self.cursor_row += 1;
-            let len = self.lines[self.cursor_row].chars().count();
-            self.cursor_col = self.cursor_col.min(len);
-        }
-    }
-
-    pub fn move_home(&mut self) {
-        self.cursor_col = 0;
-    }
-
-    pub fn move_end(&mut self) {
-        self.cursor_col = self.lines[self.cursor_row].chars().count();
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.lines.iter().all(|l| l.trim().is_empty())
-    }
-}
-
-impl std::fmt::Display for TextInput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.lines.join("\n"))
-    }
-}
-
-fn copy_to_clipboard(text: &str) -> Result<()> {
-    use std::io::Write;
-    // Try wl-copy (Wayland), then xclip, then xsel
-    let candidates = [
-        ("wl-copy", vec![]),
-        ("xclip", vec!["-selection", "clipboard"]),
-        ("xsel", vec!["--clipboard", "--input"]),
-    ];
-    for (cmd, args) in &candidates {
-        if let Ok(mut child) = std::process::Command::new(cmd)
-            .args(args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-        {
-            if let Some(stdin) = child.stdin.as_mut() {
-                let _ = stdin.write_all(text.as_bytes());
-            }
-            let _ = child.wait();
-            return Ok(());
-        }
-    }
-    Err(eyre!("No clipboard tool found (install xclip, xsel, or wl-copy)"))
-}
-
-fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
-    s.char_indices()
-        .nth(char_idx)
-        .map(|(i, _)| i)
-        .unwrap_or(s.len())
 }
 
 // ── Messages ─────────────────────────────────────────────────────────────────
@@ -501,19 +344,67 @@ impl App {
         match (self.active_panel, in_line_mode) {
             (Panel::FileList, _) if self.header_selected => {
                 // Repository-level commands
-                entries.push(WhichKeyEntry { key: 'c', label: "commit", message: OpenCommit });
-                entries.push(WhichKeyEntry { key: 'C', label: "amend", message: OpenCommitAmend });
-                entries.push(WhichKeyEntry { key: 'z', label: "undo commit", message: UndoLastCommit });
-                entries.push(WhichKeyEntry { key: 'l', label: "log", message: OpenGitLog });
-                entries.push(WhichKeyEntry { key: 'f', label: "fetch", message: GitFetch });
-                entries.push(WhichKeyEntry { key: 'b', label: "branches", message: OpenBranchList });
-                entries.push(WhichKeyEntry { key: 'B', label: "blame", message: ToggleBlame });
-                entries.push(WhichKeyEntry { key: 'S', label: "stash", message: StashSave });
-                entries.push(WhichKeyEntry { key: 'w', label: "stash list", message: OpenStashList });
-                entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
+                entries.push(WhichKeyEntry {
+                    key: 'c',
+                    label: "commit",
+                    message: OpenCommit,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'C',
+                    label: "amend",
+                    message: OpenCommitAmend,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'z',
+                    label: "undo commit",
+                    message: UndoLastCommit,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'l',
+                    label: "log",
+                    message: OpenGitLog,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'f',
+                    label: "fetch",
+                    message: GitFetch,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'b',
+                    label: "branches",
+                    message: OpenBranchList,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'B',
+                    label: "blame",
+                    message: ToggleBlame,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'S',
+                    label: "stash",
+                    message: StashSave,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'w',
+                    label: "stash list",
+                    message: OpenStashList,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'r',
+                    label: "refresh",
+                    message: Refresh,
+                });
                 if self.repo.is_rebasing() {
-                    entries.push(WhichKeyEntry { key: 'R', label: "rebase continue", message: RebaseContinue });
-                    entries.push(WhichKeyEntry { key: 'A', label: "rebase abort", message: RebaseAbort });
+                    entries.push(WhichKeyEntry {
+                        key: 'R',
+                        label: "rebase continue",
+                        message: RebaseContinue,
+                    });
+                    entries.push(WhichKeyEntry {
+                        key: 'A',
+                        label: "rebase abort",
+                        message: RebaseAbort,
+                    });
                 }
             }
             (Panel::FileList, _) => {
@@ -521,921 +412,1195 @@ impl App {
                 if let Some(entry) = self.selected_file_entry() {
                     match &entry.status {
                         FileStatus::Staged(_) => {
-                            entries.push(WhichKeyEntry { key: 'u', label: "unstage", message: UnstageFile });
+                            entries.push(WhichKeyEntry {
+                                key: 'u',
+                                label: "unstage",
+                                message: UnstageFile,
+                            });
                         }
                         FileStatus::Conflict => {
                             // Conflict files auto-open resolver; no direct actions here
                         }
                         _ => {
                             // Modified, untracked, etc.
-                            entries.push(WhichKeyEntry { key: 's', label: "stage", message: StageFile });
-                            entries.push(WhichKeyEntry { key: 'd', label: "discard", message: DiscardChanges });
+                            entries.push(WhichKeyEntry {
+                                key: 's',
+                                label: "stage",
+                                message: StageFile,
+                            });
+                            entries.push(WhichKeyEntry {
+                                key: 'd',
+                                label: "discard",
+                                message: DiscardChanges,
+                            });
                         }
                     }
-                    entries.push(WhichKeyEntry { key: 'y', label: "yank name", message: YankToClipboard });
+                    entries.push(WhichKeyEntry {
+                        key: 'y',
+                        label: "yank name",
+                        message: YankToClipboard,
+                    });
                 }
             }
             (Panel::DiffView, _) if in_conflict => {
-                entries.push(WhichKeyEntry { key: 'o', label: "pick ours", message: ConflictPickOurs });
-                entries.push(WhichKeyEntry { key: 't', label: "pick theirs", message: ConflictPickTheirs });
-                entries.push(WhichKeyEntry { key: 'b', label: "pick both", message: ConflictPickBoth });
-                entries.push(WhichKeyEntry { key: 's', label: "save & stage", message: ConflictSave });
-                entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
+                entries.push(WhichKeyEntry {
+                    key: 'o',
+                    label: "pick ours",
+                    message: ConflictPickOurs,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 't',
+                    label: "pick theirs",
+                    message: ConflictPickTheirs,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'b',
+                    label: "pick both",
+                    message: ConflictPickBoth,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 's',
+                    label: "save & stage",
+                    message: ConflictSave,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'r',
+                    label: "refresh",
+                    message: Refresh,
+                });
                 if self.repo.is_rebasing() {
-                    entries.push(WhichKeyEntry { key: 'R', label: "rebase continue", message: RebaseContinue });
-                    entries.push(WhichKeyEntry { key: 'A', label: "rebase abort", message: RebaseAbort });
+                    entries.push(WhichKeyEntry {
+                        key: 'R',
+                        label: "rebase continue",
+                        message: RebaseContinue,
+                    });
+                    entries.push(WhichKeyEntry {
+                        key: 'A',
+                        label: "rebase abort",
+                        message: RebaseAbort,
+                    });
                 }
             }
             (Panel::DiffView, false) => {
-                entries.push(WhichKeyEntry { key: 's', label: "stage hunk", message: StageHunk });
-                entries.push(WhichKeyEntry { key: 'i', label: "edit", message: EnterEditMode });
-                entries.push(WhichKeyEntry { key: 'B', label: "blame", message: ToggleBlame });
-                entries.push(WhichKeyEntry { key: 'y', label: "yank hunk", message: YankToClipboard });
-                entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
-            }
-            (Panel::DiffView, true) => {
-                let is_staged = self.diff_state.as_ref().map(|ds| ds.is_staged).unwrap_or(false);
-                entries.push(WhichKeyEntry { key: 'a', label: "toggle all", message: SelectAllLines });
                 entries.push(WhichKeyEntry {
                     key: 's',
-                    label: if is_staged { "unstage selected" } else { "stage selected" },
+                    label: "stage hunk",
+                    message: StageHunk,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'i',
+                    label: "edit",
+                    message: EnterEditMode,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'B',
+                    label: "blame",
+                    message: ToggleBlame,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'y',
+                    label: "yank hunk",
+                    message: YankToClipboard,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'r',
+                    label: "refresh",
+                    message: Refresh,
+                });
+            }
+            (Panel::DiffView, true) => {
+                let is_staged = self
+                    .diff_state
+                    .as_ref()
+                    .map(|ds| ds.is_staged)
+                    .unwrap_or(false);
+                entries.push(WhichKeyEntry {
+                    key: 'a',
+                    label: "toggle all",
+                    message: SelectAllLines,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 's',
+                    label: if is_staged {
+                        "unstage selected"
+                    } else {
+                        "stage selected"
+                    },
                     message: StageLines,
                 });
-                entries.push(WhichKeyEntry { key: 'i', label: "edit", message: EnterEditMode });
-                entries.push(WhichKeyEntry { key: 'y', label: "yank lines", message: YankToClipboard });
-                entries.push(WhichKeyEntry { key: 'r', label: "refresh", message: Refresh });
+                entries.push(WhichKeyEntry {
+                    key: 'i',
+                    label: "edit",
+                    message: EnterEditMode,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'y',
+                    label: "yank lines",
+                    message: YankToClipboard,
+                });
+                entries.push(WhichKeyEntry {
+                    key: 'r',
+                    label: "refresh",
+                    message: Refresh,
+                });
             }
         }
-        entries.push(WhichKeyEntry { key: 'T', label: "next theme", message: CycleTheme });
+        entries.push(WhichKeyEntry {
+            key: 'T',
+            label: "next theme",
+            message: CycleTheme,
+        });
         entries
     }
 
     pub fn update(&mut self, msg: Message) -> Result<()> {
         match msg {
-            Message::OpenWhichKey => {
-                self.which_key = Some(self.build_which_key_entries());
+            // ── General ──────────────────────────────────────────────────
+            Message::OpenWhichKey => self.which_key = Some(self.build_which_key_entries()),
+            Message::CycleTheme => self.handle_cycle_theme(),
+            Message::Quit => self.handle_quit(),
+            Message::CloseOverlay => self.handle_close_overlay(),
+            Message::Refresh => self.handle_refresh()?,
+            Message::AutoRefresh => {
+                self.refresh()?;
+                self.last_refresh = Instant::now();
             }
-            Message::CycleTheme => {
-                let next = Theme::next_theme_name(self.theme.name);
-                self.theme = Theme::from_name(next);
-                self.highlighter = Highlighter::new(&self.theme.syntax_theme);
-                self.status_message = Some(format!("Theme: {next}"));
-            }
-            Message::Quit => {
-                if self.overlay.is_active() {
-                    self.overlay = Overlay::None;
-                } else {
-                    self.should_quit = true;
-                }
-            }
-            Message::CloseOverlay => {
-                if let Overlay::CommitDetail { log_entries, log_selected, .. } = std::mem::replace(&mut self.overlay, Overlay::None) {
-                    self.overlay = Overlay::GitLog {
-                        entries: log_entries,
-                        selected: log_selected,
-                        scroll: 0,
-                    };
-                }
-            }
+
+            // ── Navigation ───────────────────────────────────────────────
             Message::MoveUp => self.handle_move_up()?,
             Message::MoveDown => self.handle_move_down()?,
-            Message::PrevHunk => {
-                if let Some(ds) = &mut self.diff_state {
-                    if !ds.hunks.is_empty() && ds.current_hunk > 0 {
-                        ds.current_hunk -= 1;
-                        let start = ds.hunks[ds.current_hunk].display_start;
-                        let offset = ds.viewport_height / 3;
-                        ds.scroll = start.saturating_sub(offset);
-                    }
-                }
+            Message::PrevHunk => self.handle_prev_hunk(),
+            Message::NextHunk => self.handle_next_hunk(),
+            Message::SwitchPanel => self.handle_switch_panel(),
+
+            // ── Staging / unstaging ──────────────────────────────────────
+            Message::StageFile => self.handle_stage_file()?,
+            Message::StageHunk => self.stage_current_hunk()?,
+            Message::UnstageFile => self.handle_unstage_file()?,
+            Message::DiscardChanges => self.handle_discard_changes(),
+            Message::StageLines => self.stage_selected_lines()?,
+
+            // ── Line mode ────────────────────────────────────────────────
+            Message::EnterLineMode => self.handle_enter_line_mode(),
+            Message::ExitLineMode => self.handle_exit_line_mode(),
+            Message::ToggleLine => self.handle_toggle_line(),
+            Message::SelectAllLines => self.handle_select_all_lines(),
+
+            // ── Edit / blame ─────────────────────────────────────────────
+            Message::EnterEditMode => self.handle_enter_edit_mode(),
+            Message::ToggleBlame => self.handle_toggle_blame(),
+            Message::YankToClipboard => self.handle_yank(),
+
+            // ── Conflict resolution ──────────────────────────────────────
+            Message::ConflictPickOurs => self.handle_conflict_pick(ConflictResolution::Ours),
+            Message::ConflictPickTheirs => self.handle_conflict_pick(ConflictResolution::Theirs),
+            Message::ConflictPickBoth => self.handle_conflict_pick(ConflictResolution::Both),
+            Message::ConflictSave => self.handle_conflict_save()?,
+            Message::CloseConflict => self.active_panel = Panel::FileList,
+
+            // ── Filter ───────────────────────────────────────────────────
+            Message::StartFilter => self.file_filter = Some(String::new()),
+            Message::ClearFilter => self.file_filter = None,
+
+            // ── Remote ───────────────────────────────────────────────────
+            Message::GitFetch => self.handle_git_fetch(),
+
+            // ── Branches ─────────────────────────────────────────────────
+            Message::OpenBranchList => self.handle_open_branch_list(),
+            Message::CheckoutBranch => self.handle_checkout_branch()?,
+            Message::StartCreateBranch => self.handle_start_create_branch(),
+            Message::ConfirmCreateBranch => self.handle_confirm_create_branch()?,
+
+            // ── Stash ────────────────────────────────────────────────────
+            Message::StashSave => self.handle_stash_save()?,
+            Message::OpenStashList => self.handle_open_stash_list(),
+            Message::StashPop => self.handle_stash_pop()?,
+            Message::StashApply => self.handle_stash_apply()?,
+            Message::StashDrop => self.handle_stash_drop()?,
+
+            // ── Commit / Log ─────────────────────────────────────────────
+            Message::OpenCommit => self.handle_open_commit(),
+            Message::OpenCommitAmend => self.handle_open_commit_amend(),
+            Message::ConfirmCommit => self.do_commit()?,
+            Message::ConfirmAction => self.handle_confirm_action()?,
+            Message::UndoLastCommit => self.handle_undo_last_commit(),
+            Message::OpenGitLog => self.handle_open_git_log(),
+            Message::DirtyCheckoutStash => self.handle_dirty_checkout_stash()?,
+            Message::DirtyCheckoutDiscard => self.handle_dirty_checkout_discard()?,
+
+            // ── Rebase ───────────────────────────────────────────────────
+            Message::StartRebase => self.handle_start_rebase(),
+            Message::RebaseCycleAction => self.handle_rebase_cycle_action(),
+            Message::RebaseMoveUp => self.handle_rebase_move_up(),
+            Message::RebaseMoveDown => self.handle_rebase_move_down(),
+            Message::RebaseExecute => self.handle_rebase_execute()?,
+            Message::RebaseContinue => self.handle_rebase_continue()?,
+            Message::RebaseAbort => self.handle_rebase_abort()?,
+
+            // ── Commit detail ────────────────────────────────────────────
+            Message::ViewCommitDetail => self.handle_view_commit_detail(),
+            Message::PrevCommitDetail | Message::NextCommitDetail => {
+                self.handle_navigate_commit_detail(matches!(msg, Message::NextCommitDetail))?;
             }
-            Message::NextHunk => {
-                if let Some(ds) = &mut self.diff_state {
-                    if !ds.hunks.is_empty() && ds.current_hunk < ds.hunks.len() - 1 {
-                        ds.current_hunk += 1;
-                        let start = ds.hunks[ds.current_hunk].display_start;
-                        let offset = ds.viewport_height / 3;
-                        ds.scroll = start.saturating_sub(offset);
-                    }
-                }
+            Message::PrevHunkCommitDetail => self.handle_prev_hunk_commit_detail(),
+            Message::NextHunkCommitDetail => self.handle_next_hunk_commit_detail(),
+        }
+        Ok(())
+    }
+
+    // ── General handlers ─────────────────────────────────────────────────────
+
+    fn handle_cycle_theme(&mut self) {
+        let next = Theme::next_theme_name(self.theme.name);
+        self.theme = Theme::from_name(next);
+        self.highlighter = Highlighter::new(&self.theme.syntax_theme);
+        self.status_message = Some(format!("Theme: {next}"));
+    }
+
+    fn handle_quit(&mut self) {
+        if self.overlay.is_active() {
+            self.overlay = Overlay::None;
+        } else {
+            self.should_quit = true;
+        }
+    }
+
+    fn handle_close_overlay(&mut self) {
+        if let Overlay::CommitDetail {
+            log_entries,
+            log_selected,
+            ..
+        } = std::mem::replace(&mut self.overlay, Overlay::None)
+        {
+            self.overlay = Overlay::GitLog {
+                entries: log_entries,
+                selected: log_selected,
+                scroll: 0,
+            };
+        }
+    }
+
+    fn handle_refresh(&mut self) -> Result<()> {
+        self.refresh()?;
+        if self.diff_state.is_some() {
+            self.load_selected_diff()?;
+        }
+        Ok(())
+    }
+
+    // ── Navigation handlers ──────────────────────────────────────────────────
+
+    fn handle_prev_hunk(&mut self) {
+        if let Some(ds) = &mut self.diff_state {
+            if !ds.hunks.is_empty() && ds.current_hunk > 0 {
+                ds.current_hunk -= 1;
+                let start = ds.hunks[ds.current_hunk].display_start;
+                let offset = ds.viewport_height / 3;
+                ds.scroll = start.saturating_sub(offset);
             }
-            Message::SwitchPanel => {
-                if self.active_panel == Panel::DiffView {
-                    if let Some(ds) = &mut self.diff_state {
-                        ds.view_mode = DiffViewMode::HunkNav;
-                        ds.selected_lines.clear();
-                    }
-                }
-                // Don't switch to diff view when header is selected (no diff loaded)
-                if self.header_selected && self.active_panel == Panel::FileList {
-                    return Ok(());
-                }
-                self.active_panel = match self.active_panel {
-                    Panel::FileList => Panel::DiffView,
-                    Panel::DiffView => Panel::FileList,
+        }
+    }
+
+    fn handle_next_hunk(&mut self) {
+        if let Some(ds) = &mut self.diff_state {
+            if !ds.hunks.is_empty() && ds.current_hunk < ds.hunks.len() - 1 {
+                ds.current_hunk += 1;
+                let start = ds.hunks[ds.current_hunk].display_start;
+                let offset = ds.viewport_height / 3;
+                ds.scroll = start.saturating_sub(offset);
+            }
+        }
+    }
+
+    fn handle_switch_panel(&mut self) {
+        if self.active_panel == Panel::DiffView {
+            if let Some(ds) = &mut self.diff_state {
+                ds.view_mode = DiffViewMode::HunkNav;
+                ds.selected_lines.clear();
+            }
+        }
+        // Don't switch to diff view when header is selected (no diff loaded)
+        if self.header_selected && self.active_panel == Panel::FileList {
+            return;
+        }
+        self.active_panel = match self.active_panel {
+            Panel::FileList => Panel::DiffView,
+            Panel::DiffView => Panel::FileList,
+        };
+    }
+
+    // ── Staging handlers ─────────────────────────────────────────────────────
+
+    fn handle_stage_file(&mut self) -> Result<()> {
+        if let Some(entry) = self.selected_file_entry() {
+            if entry.status == FileStatus::Conflict {
+                self.status_message =
+                    Some("Cannot stage conflict file — resolve conflicts first".into());
+                return Ok(());
+            }
+            let path = entry.path.clone();
+            let in_diff_partial = self.active_panel == Panel::DiffView
+                && self
+                    .diff_state
+                    .as_ref()
+                    .is_some_and(|ds| !ds.hunks.is_empty());
+            if in_diff_partial {
+                self.overlay = Overlay::Confirm {
+                    message: format!("Stage entire file '{path}'? (Use 's' to stage current hunk)"),
+                    action: PendingAction::StageEntireFile { path },
                 };
+            } else {
+                self.repo.stage_file(&path)?;
+                self.status_message = Some(format!("Staged: {path}"));
+                self.refresh()?;
+                self.load_selected_diff()?;
             }
-            Message::StageFile => {
-                if let Some(entry) = self.selected_file_entry() {
-                    if entry.status == FileStatus::Conflict {
-                        self.status_message = Some("Cannot stage conflict file — resolve conflicts first".into());
-                        return Ok(());
+        }
+        Ok(())
+    }
+
+    fn handle_unstage_file(&mut self) -> Result<()> {
+        if let Some(entry) = self.selected_file_entry() {
+            let path = entry.path.clone();
+            self.repo.unstage_file(&path)?;
+            self.status_message = Some(format!("Unstaged: {path}"));
+            self.refresh()?;
+            self.load_selected_diff()?;
+        }
+        Ok(())
+    }
+
+    fn handle_discard_changes(&mut self) {
+        if let Some(entry) = self.selected_file_entry() {
+            let path = entry.path.clone();
+            match entry.status {
+                FileStatus::Unstaged(_) | FileStatus::Conflict => {
+                    self.overlay = Overlay::Confirm {
+                        message: format!("Discard changes to {path}? This cannot be undone."),
+                        action: PendingAction::DiscardChanges { path },
+                    };
+                }
+                _ => {
+                    self.status_message = Some("Can only discard unstaged changes".into());
+                }
+            }
+        }
+    }
+
+    // ── Line mode handlers ───────────────────────────────────────────────────
+
+    fn handle_enter_line_mode(&mut self) {
+        if let Some(ds) = &mut self.diff_state {
+            if ds.hunks.is_empty() {
+                return;
+            }
+            let mut all_changed = Vec::new();
+            for hunk in &ds.hunks {
+                all_changed.extend(git::changed_rows_in_hunk(hunk, &ds.left_lines));
+            }
+            if all_changed.is_empty() {
+                return;
+            }
+
+            if let Some((_saved_hunk, saved_sel, saved_cursor)) = ds.saved_line_selection.take() {
+                ds.selected_lines = saved_sel;
+                ds.cursor_line = saved_cursor;
+            } else {
+                ds.selected_lines.clear();
+                let hunk = &ds.hunks[ds.current_hunk];
+                let hunk_rows = git::changed_rows_in_hunk(hunk, &ds.left_lines);
+                ds.cursor_line = hunk_rows.first().copied().unwrap_or(all_changed[0]);
+            }
+            ds.hunk_changed_rows = all_changed;
+            ds.view_mode = DiffViewMode::LineNav;
+            self.status_message = None;
+            Self::keep_cursor_visible(ds);
+        }
+    }
+
+    fn handle_exit_line_mode(&mut self) {
+        if let Some(ds) = &mut self.diff_state {
+            ds.saved_line_selection =
+                Some((ds.current_hunk, ds.selected_lines.clone(), ds.cursor_line));
+            ds.view_mode = DiffViewMode::HunkNav;
+            ds.selected_lines.clear();
+            let offset = ds.viewport_height / 3;
+            ds.scroll = ds
+                .hunks
+                .get(ds.current_hunk)
+                .map(|h| h.display_start.saturating_sub(offset))
+                .unwrap_or(0);
+            self.status_message = None;
+        }
+    }
+
+    fn handle_toggle_line(&mut self) {
+        if let Some(ds) = &mut self.diff_state {
+            if ds.view_mode == DiffViewMode::LineNav {
+                let row = ds.cursor_line;
+                if ds.selected_lines.contains(&row) {
+                    ds.selected_lines.remove(&row);
+                } else {
+                    ds.selected_lines.insert(row);
+                }
+            }
+        }
+    }
+
+    fn handle_select_all_lines(&mut self) {
+        if let Some(ds) = &mut self.diff_state {
+            if ds.view_mode == DiffViewMode::LineNav {
+                if ds.selected_lines.len() == ds.hunk_changed_rows.len() {
+                    ds.selected_lines.clear();
+                } else {
+                    ds.selected_lines = ds.hunk_changed_rows.iter().copied().collect();
+                }
+            }
+        }
+    }
+
+    // ── Edit / blame / yank handlers ─────────────────────────────────────────
+
+    fn handle_enter_edit_mode(&mut self) {
+        if let Some(ds) = &self.diff_state {
+            let path = ds.file_path.clone();
+            let target_row = if ds.view_mode == DiffViewMode::LineNav {
+                ds.cursor_line
+            } else if let Some(hunk) = ds.hunks.get(ds.current_hunk) {
+                hunk.display_start
+            } else {
+                ds.scroll
+            };
+
+            let mut file_line: usize = 0;
+            for (i, dl) in ds.right_lines.iter().enumerate() {
+                if i >= target_row {
+                    break;
+                }
+                if dl.kind != git::DiffLineKind::Spacer {
+                    file_line += 1;
+                }
+            }
+            let line_number = file_line.max(1);
+
+            self.pending_editor = Some(EditorRequest {
+                file_path: path,
+                line_number,
+            });
+        } else {
+            self.status_message = Some("Select a file first (Enter on file list)".into());
+        }
+    }
+
+    fn handle_toggle_blame(&mut self) {
+        if self.show_blame {
+            self.show_blame = false;
+            self.blame_data = None;
+            self.status_message = Some("Blame off".into());
+        } else if let Some(ds) = &self.diff_state {
+            let path = ds.file_path.clone();
+            match self.repo.get_blame(&path) {
+                Ok(data) => {
+                    self.blame_data = Some(data);
+                    self.show_blame = true;
+                    self.status_message = Some("Blame on".into());
+                }
+                Err(e) => {
+                    self.status_message = Some(format!("Blame failed: {e}"));
+                }
+            }
+        } else {
+            self.status_message = Some("No file selected for blame".into());
+        }
+    }
+
+    fn handle_yank(&mut self) {
+        if let Some(text) = self.get_yank_text() {
+            match copy_to_clipboard(&text) {
+                Ok(()) => {
+                    let preview: String = text.chars().take(40).collect();
+                    self.status_message = Some(format!("Yanked: {preview}"));
+                }
+                Err(e) => {
+                    self.status_message = Some(format!("Clipboard error: {e}"));
+                }
+            }
+        }
+    }
+
+    // ── Conflict resolution handlers ─────────────────────────────────────────
+
+    fn handle_conflict_pick(&mut self, resolution: ConflictResolution) {
+        if let Some(cs) = &mut self.conflict_state {
+            cs.sections[cs.current_section].resolution = resolution.clone();
+            let label = match &resolution {
+                ConflictResolution::Ours => cs.left_name.clone(),
+                ConflictResolution::Theirs => cs.right_name.clone(),
+                ConflictResolution::Both => "both".into(),
+                ConflictResolution::Unresolved => "unresolved".into(),
+            };
+            self.status_message = Some(format!("Picked: {label}"));
+        }
+    }
+
+    fn handle_conflict_save(&mut self) -> Result<()> {
+        if let Some(cs) = &self.conflict_state {
+            let unresolved = cs
+                .sections
+                .iter()
+                .filter(|s| s.resolution == ConflictResolution::Unresolved)
+                .count();
+            if unresolved > 0 {
+                self.status_message = Some(format!("{unresolved} conflict(s) still unresolved"));
+            } else {
+                let mut output = cs.prefix.clone();
+                for section in &cs.sections {
+                    match section.resolution {
+                        ConflictResolution::Ours => output.extend(section.ours.clone()),
+                        ConflictResolution::Theirs => output.extend(section.theirs.clone()),
+                        ConflictResolution::Both => {
+                            output.extend(section.ours.clone());
+                            output.extend(section.theirs.clone());
+                        }
+                        ConflictResolution::Unresolved => {}
                     }
-                    let path = entry.path.clone();
-                    // In diff view with hunks available, confirm before staging entire file
-                    let in_diff_partial = self.active_panel == Panel::DiffView
-                        && self.diff_state.as_ref().is_some_and(|ds| !ds.hunks.is_empty());
-                    if in_diff_partial {
-                        self.overlay = Overlay::Confirm {
-                            message: format!("Stage entire file '{path}'? (Use 's' to stage current hunk)"),
-                            action: PendingAction::StageEntireFile { path },
-                        };
-                    } else {
-                        self.repo.stage_file(&path)?;
-                        self.status_message = Some(format!("Staged: {path}"));
+                    output.extend(section.suffix.clone());
+                }
+                let content = output.join("\n") + "\n";
+                let path = cs.file_path.clone();
+                let workdir = self.repo.workdir().to_path_buf();
+                let full_path = workdir.join(&path);
+                match std::fs::write(&full_path, &content) {
+                    Ok(()) => {
+                        let _ = self.repo.stage_file(&path);
+                        self.conflict_state = None;
+                        self.status_message = Some(format!("Resolved and staged: {path}"));
                         self.refresh()?;
                         self.load_selected_diff()?;
                     }
-                }
-            }
-            Message::StageHunk => {
-                self.stage_current_hunk()?;
-            }
-            Message::UnstageFile => {
-                if let Some(entry) = self.selected_file_entry() {
-                    let path = entry.path.clone();
-                    self.repo.unstage_file(&path)?;
-                    self.status_message = Some(format!("Unstaged: {path}"));
-                    self.refresh()?;
-                    self.load_selected_diff()?;
-                }
-            }
-            Message::DiscardChanges => {
-                if let Some(entry) = self.selected_file_entry() {
-                    let path = entry.path.clone();
-                    match entry.status {
-                        FileStatus::Unstaged(_) | FileStatus::Conflict => {
-                            self.overlay = Overlay::Confirm {
-                                message: format!("Discard changes to {path}? This cannot be undone."),
-                                action: PendingAction::DiscardChanges { path },
-                            };
-                        }
-                        _ => {
-                            self.status_message =
-                                Some("Can only discard unstaged changes".into());
-                        }
+                    Err(e) => {
+                        self.status_message = Some(format!("Save failed: {e}"));
                     }
                 }
             }
-            Message::Refresh => {
+        }
+        Ok(())
+    }
+
+    // ── Remote handlers ──────────────────────────────────────────────────────
+
+    fn handle_git_fetch(&mut self) {
+        self.pending_terminal_cmd = Some(TerminalCmd {
+            program: "git".into(),
+            args: vec!["fetch".into(), "--all".into()],
+            workdir: self.repo.workdir().to_path_buf(),
+            success_msg: "Fetched successfully".into(),
+        });
+    }
+
+    // ── Branch handlers ──────────────────────────────────────────────────────
+
+    fn handle_open_branch_list(&mut self) {
+        match self.repo.list_branches() {
+            Ok(entries) => {
+                let sel = entries.iter().position(|b| b.is_current).unwrap_or(0);
+                self.overlay = Overlay::BranchList {
+                    entries,
+                    selected: sel,
+                    creating: None,
+                };
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Branch list failed: {e}"));
+            }
+        }
+    }
+
+    fn handle_checkout_branch(&mut self) -> Result<()> {
+        if let Overlay::BranchList {
+            entries, selected, ..
+        } = &self.overlay
+        {
+            if let Some(entry) = entries.get(*selected) {
+                let name = if entry.is_remote {
+                    entry.name.split('/').skip(1).collect::<Vec<_>>().join("/")
+                } else {
+                    entry.name.clone()
+                };
+                if !self.file_entries.is_empty() {
+                    let has_conflicts = self
+                        .file_entries
+                        .iter()
+                        .any(|e| e.status == FileStatus::Conflict);
+                    self.overlay = Overlay::DirtyCheckout {
+                        branch: name,
+                        has_conflicts,
+                    };
+                } else {
+                    self.overlay = Overlay::None;
+                    self.do_checkout(&name)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_start_create_branch(&mut self) {
+        if let Overlay::BranchList {
+            ref mut creating, ..
+        } = self.overlay
+        {
+            *creating = Some(String::new());
+        }
+    }
+
+    fn handle_confirm_create_branch(&mut self) -> Result<()> {
+        if let Overlay::BranchList {
+            creating: Some(name),
+            ..
+        } = &self.overlay
+        {
+            let name = name.clone();
+            if name.is_empty() {
+                self.status_message = Some("Branch name cannot be empty".into());
+            } else {
+                self.overlay = Overlay::None;
+                match self.repo.create_branch(&name) {
+                    Ok(()) => {
+                        self.status_message = Some(format!("Created and switched to {name}"));
+                        self.refresh()?;
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Create branch failed: {e}"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // ── Stash handlers ───────────────────────────────────────────────────────
+
+    fn handle_stash_save(&mut self) -> Result<()> {
+        match self.repo.stash_save(None) {
+            Ok(()) => {
+                self.status_message = Some("Stashed changes".into());
                 self.refresh()?;
                 if self.diff_state.is_some() {
                     self.load_selected_diff()?;
                 }
             }
-            Message::AutoRefresh => {
-                self.refresh()?;
-                self.last_refresh = Instant::now();
+            Err(e) => {
+                self.status_message = Some(format!("Stash failed: {e}"));
             }
-            Message::EnterLineMode => {
-                if let Some(ds) = &mut self.diff_state {
-                    if ds.hunks.is_empty() {
-                        return Ok(());
-                    }
-                    // Collect all changed rows across all hunks
-                    let mut all_changed = Vec::new();
-                    for hunk in &ds.hunks {
-                        all_changed.extend(git::changed_rows_in_hunk(hunk, &ds.left_lines));
-                    }
-                    if all_changed.is_empty() {
-                        return Ok(());
-                    }
+        }
+        Ok(())
+    }
 
-                    // Restore saved selection, or start at current hunk
-                    if let Some((_saved_hunk, saved_sel, saved_cursor)) = ds.saved_line_selection.take() {
-                        ds.selected_lines = saved_sel;
-                        ds.cursor_line = saved_cursor;
-                    } else {
-                        ds.selected_lines.clear();
-                        let hunk = &ds.hunks[ds.current_hunk];
-                        let hunk_rows = git::changed_rows_in_hunk(hunk, &ds.left_lines);
-                        ds.cursor_line = hunk_rows.first().copied().unwrap_or(all_changed[0]);
-                    }
-                    ds.hunk_changed_rows = all_changed;
-                    ds.view_mode = DiffViewMode::LineNav;
-                    self.status_message = None;
-                    // Only adjust scroll if cursor is off-screen
-                    Self::keep_cursor_visible(ds);
-                }
-            }
-            Message::EnterEditMode => {
-                if let Some(ds) = &self.diff_state {
-                    let path = ds.file_path.clone();
-
-                    // Pick the diff display row closest to what the user is looking at:
-                    // - In line mode: the cursor position
-                    // - In hunk mode: the start of the current hunk
-                    let target_row = if ds.view_mode == DiffViewMode::LineNav {
-                        ds.cursor_line
-                    } else if let Some(hunk) = ds.hunks.get(ds.current_hunk) {
-                        hunk.display_start
-                    } else {
-                        ds.scroll
+    fn handle_open_stash_list(&mut self) {
+        match self.repo.stash_list() {
+            Ok(entries) => {
+                if entries.is_empty() {
+                    self.status_message = Some("No stashes".into());
+                } else {
+                    self.overlay = Overlay::StashList {
+                        entries,
+                        selected: 0,
                     };
+                }
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Stash list failed: {e}"));
+            }
+        }
+    }
 
-                    // Map display row to file line number by counting
-                    // non-spacer right_lines (each = one line in the file).
-                    let mut file_line: usize = 0;
-                    for (i, dl) in ds.right_lines.iter().enumerate() {
-                        if i >= target_row {
-                            break;
-                        }
-                        if dl.kind != git::DiffLineKind::Spacer {
-                            file_line += 1;
-                        }
-                    }
-                    // Editor line numbers are 1-based
-                    let line_number = file_line.max(1);
-
-                    self.pending_editor = Some(EditorRequest {
-                        file_path: path,
-                        line_number,
-                    });
-                } else {
-                    self.status_message = Some("Select a file first (Enter on file list)".into());
-                }
-            }
-            Message::ConflictPickOurs => {
-                if let Some(cs) = &mut self.conflict_state {
-                    cs.sections[cs.current_section].resolution = ConflictResolution::Ours;
-                    let name = &cs.left_name;
-                    self.status_message = Some(format!("Picked: {name}"));
-                }
-            }
-            Message::ConflictPickTheirs => {
-                if let Some(cs) = &mut self.conflict_state {
-                    cs.sections[cs.current_section].resolution = ConflictResolution::Theirs;
-                    let name = &cs.right_name;
-                    self.status_message = Some(format!("Picked: {name}"));
-                }
-            }
-            Message::ConflictPickBoth => {
-                if let Some(cs) = &mut self.conflict_state {
-                    cs.sections[cs.current_section].resolution = ConflictResolution::Both;
-                    self.status_message = Some("Picked: both".into());
-                }
-            }
-            Message::ConflictSave => {
-                if let Some(cs) = &self.conflict_state {
-                    // Check all resolved
-                    let unresolved = cs.sections.iter().filter(|s| s.resolution == ConflictResolution::Unresolved).count();
-                    if unresolved > 0 {
-                        self.status_message = Some(format!("{unresolved} conflict(s) still unresolved"));
-                    } else {
-                        let mut output = cs.prefix.clone();
-                        for section in &cs.sections {
-                            match section.resolution {
-                                ConflictResolution::Ours => output.extend(section.ours.clone()),
-                                ConflictResolution::Theirs => output.extend(section.theirs.clone()),
-                                ConflictResolution::Both => {
-                                    output.extend(section.ours.clone());
-                                    output.extend(section.theirs.clone());
-                                }
-                                ConflictResolution::Unresolved => {}
-                            }
-                            output.extend(section.suffix.clone());
-                        }
-                        let content = output.join("\n") + "\n";
-                        let path = cs.file_path.clone();
-                        let workdir = self.repo.workdir().to_path_buf();
-                        let full_path = workdir.join(&path);
-                        match std::fs::write(&full_path, &content) {
-                            Ok(()) => {
-                                // Stage the resolved file
-                                let _ = self.repo.stage_file(&path);
-                                self.conflict_state = None;
-                                self.status_message = Some(format!("Resolved and staged: {path}"));
-                                self.refresh()?;
-                                self.load_selected_diff()?;
-                            }
-                            Err(e) => {
-                                self.status_message = Some(format!("Save failed: {e}"));
-                            }
-                        }
-                    }
-                }
-            }
-            Message::CloseConflict => {
-                self.active_panel = Panel::FileList;
-            }
-            Message::ToggleBlame => {
-                if self.show_blame {
-                    self.show_blame = false;
-                    self.blame_data = None;
-                    self.status_message = Some("Blame off".into());
-                } else if let Some(ds) = &self.diff_state {
-                    let path = ds.file_path.clone();
-                    match self.repo.get_blame(&path) {
-                        Ok(data) => {
-                            self.blame_data = Some(data);
-                            self.show_blame = true;
-                            self.status_message = Some("Blame on".into());
-                        }
-                        Err(e) => {
-                            self.status_message = Some(format!("Blame failed: {e}"));
-                        }
-                    }
-                } else {
-                    self.status_message = Some("No file selected for blame".into());
-                }
-            }
-            Message::ExitLineMode => {
-                if let Some(ds) = &mut self.diff_state {
-                    // Save selection so re-entering restores it
-                    ds.saved_line_selection = Some((
-                        ds.current_hunk,
-                        ds.selected_lines.clone(),
-                        ds.cursor_line,
-                    ));
-                    ds.view_mode = DiffViewMode::HunkNav;
-                    ds.selected_lines.clear();
-                    let offset = ds.viewport_height / 3;
-                    ds.scroll = ds.hunks.get(ds.current_hunk)
-                        .map(|h| h.display_start.saturating_sub(offset))
-                        .unwrap_or(0);
-                    self.status_message = None;
-                }
-            }
-            Message::ToggleLine => {
-                if let Some(ds) = &mut self.diff_state {
-                    if ds.view_mode == DiffViewMode::LineNav {
-                        let row = ds.cursor_line;
-                        if ds.selected_lines.contains(&row) {
-                            ds.selected_lines.remove(&row);
-                        } else {
-                            ds.selected_lines.insert(row);
-                        }
-                    }
-                }
-            }
-            Message::SelectAllLines => {
-                if let Some(ds) = &mut self.diff_state {
-                    if ds.view_mode == DiffViewMode::LineNav {
-                        if ds.selected_lines.len() == ds.hunk_changed_rows.len() {
-                            ds.selected_lines.clear();
-                        } else {
-                            ds.selected_lines = ds.hunk_changed_rows.iter().copied().collect();
-                        }
-                    }
-                }
-            }
-            Message::StageLines => {
-                self.stage_selected_lines()?;
-            }
-            Message::YankToClipboard => {
-                let text = self.get_yank_text();
-                if let Some(text) = text {
-                    match copy_to_clipboard(&text) {
-                        Ok(()) => {
-                            let preview: String = text.chars().take(40).collect();
-                            self.status_message = Some(format!("Yanked: {preview}"));
-                        }
-                        Err(e) => {
-                            self.status_message = Some(format!("Clipboard error: {e}"));
-                        }
-                    }
-                }
-            }
-
-            // ── Filter ────────────────────────────────────────────────────
-            Message::StartFilter => {
-                self.file_filter = Some(String::new());
-            }
-            Message::ClearFilter => {
-                self.file_filter = None;
-            }
-
-            // ── Remote ────────────────────────────────────────────────────
-            Message::GitFetch => {
-                self.pending_terminal_cmd = Some(TerminalCmd {
-                    program: "git".into(),
-                    args: vec!["fetch".into(), "--all".into()],
-                    workdir: self.repo.workdir().to_path_buf(),
-                    success_msg: "Fetched successfully".into(),
-                });
-            }
-
-            // ── Branches ──────────────────────────────────────────────────
-            Message::OpenBranchList => {
-                match self.repo.list_branches() {
-                    Ok(entries) => {
-                        let sel = entries.iter().position(|b| b.is_current).unwrap_or(0);
-                        self.overlay = Overlay::BranchList {
-                            entries,
-                            selected: sel,
-                            creating: None,
-                        };
+    fn handle_stash_pop(&mut self) -> Result<()> {
+        if let Overlay::StashList { entries, selected } = &self.overlay {
+            let idx = entries.get(*selected).map(|e| e.index);
+            if let Some(idx) = idx {
+                let sel = *selected;
+                self.overlay = Overlay::None;
+                match self.repo.stash_pop(idx) {
+                    Ok(()) => {
+                        self.status_message = Some(format!("Popped stash@{{{sel}}}"));
+                        self.refresh()?;
                     }
                     Err(e) => {
-                        self.status_message = Some(format!("Branch list failed: {e}"));
+                        self.status_message = Some(format!("Stash pop failed: {e}"));
                     }
                 }
             }
-            Message::CheckoutBranch => {
-                if let Overlay::BranchList { entries, selected, .. } = &self.overlay {
-                    if let Some(entry) = entries.get(*selected) {
-                        let name = if entry.is_remote {
-                            entry.name.split('/').skip(1).collect::<Vec<_>>().join("/")
-                        } else {
-                            entry.name.clone()
-                        };
-                        if !self.file_entries.is_empty() {
-                            let has_conflicts = self.file_entries.iter().any(|e| e.status == FileStatus::Conflict);
-                            self.overlay = Overlay::DirtyCheckout { branch: name, has_conflicts };
-                        } else {
-                            self.overlay = Overlay::None;
-                            self.do_checkout(&name)?;
-                        }
-                    }
-                }
-            }
-            Message::StartCreateBranch => {
-                if let Overlay::BranchList { ref mut creating, .. } = self.overlay {
-                    *creating = Some(String::new());
-                }
-            }
-            Message::ConfirmCreateBranch => {
-                if let Overlay::BranchList { creating: Some(name), .. } = &self.overlay {
-                    let name = name.clone();
-                    if name.is_empty() {
-                        self.status_message = Some("Branch name cannot be empty".into());
-                    } else {
-                        self.overlay = Overlay::None;
-                        match self.repo.create_branch(&name) {
-                            Ok(()) => {
-                                self.status_message = Some(format!("Created and switched to {name}"));
-                                self.refresh()?;
-                            }
-                            Err(e) => {
-                                self.status_message = Some(format!("Create branch failed: {e}"));
-                            }
-                        }
-                    }
-                }
-            }
+        }
+        Ok(())
+    }
 
-            // ── Stash ─────────────────────────────────────────────────────
-            Message::StashSave => {
-                match self.repo.stash_save(None) {
+    fn handle_stash_apply(&mut self) -> Result<()> {
+        if let Overlay::StashList {
+            entries, selected, ..
+        } = &self.overlay
+        {
+            let idx = entries.get(*selected).map(|e| e.index);
+            if let Some(idx) = idx {
+                let sel = *selected;
+                match self.repo.stash_apply(idx) {
                     Ok(()) => {
-                        self.status_message = Some("Stashed changes".into());
+                        self.status_message = Some(format!("Applied stash@{{{sel}}}"));
+                        self.refresh()?;
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Stash apply failed: {e}"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_stash_drop(&mut self) -> Result<()> {
+        if let Overlay::StashList { entries, selected } = &self.overlay {
+            let idx = entries.get(*selected).map(|e| e.index);
+            let sel = *selected;
+            if let Some(idx) = idx {
+                self.overlay = Overlay::None;
+                match self.repo.stash_drop(idx) {
+                    Ok(()) => {
+                        self.status_message = Some(format!("Dropped stash@{{{sel}}}"));
+                        if let Ok(new_entries) = self.repo.stash_list() {
+                            if !new_entries.is_empty() {
+                                self.overlay = Overlay::StashList {
+                                    selected: sel.min(new_entries.len().saturating_sub(1)),
+                                    entries: new_entries,
+                                };
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Stash drop failed: {e}"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // ── Commit / Log handlers ────────────────────────────────────────────────
+
+    fn handle_open_commit(&mut self) {
+        if !self.repo.has_staged_changes() {
+            self.status_message = Some("Nothing staged to commit".into());
+            return;
+        }
+        let initial = self.saved_commit_msg.take().unwrap_or_default();
+        self.overlay = Overlay::CommitInput {
+            input: TextInput::new(&initial),
+            amend: false,
+        };
+    }
+
+    fn handle_open_commit_amend(&mut self) {
+        self.overlay = Overlay::Confirm {
+            message: "Amend the last commit? This will rewrite history.".into(),
+            action: PendingAction::CommitAmend,
+        };
+    }
+
+    fn handle_undo_last_commit(&mut self) {
+        self.overlay = Overlay::Confirm {
+            message: "Undo the last commit? Changes will be unstaged.".into(),
+            action: PendingAction::UndoLastCommit,
+        };
+    }
+
+    fn handle_confirm_action(&mut self) -> Result<()> {
+        let action = match &self.overlay {
+            Overlay::Confirm { action, .. } => action.clone(),
+            _ => return Ok(()),
+        };
+        self.overlay = Overlay::None;
+        match action {
+            PendingAction::CommitAmend => {
+                let initial = self.repo.last_commit_message().unwrap_or_default();
+                self.overlay = Overlay::CommitInput {
+                    input: TextInput::new(&initial),
+                    amend: true,
+                };
+            }
+            PendingAction::UndoLastCommit => {
+                match self.repo.undo_last_commit() {
+                    Ok(msg) => {
+                        self.status_message = Some("Undone last commit (message saved)".into());
+                        self.saved_commit_msg = Some(msg);
                         self.refresh()?;
                         if self.diff_state.is_some() {
                             self.load_selected_diff()?;
                         }
                     }
                     Err(e) => {
-                        self.status_message = Some(format!("Stash failed: {e}"));
-                    }
-                }
-            }
-            Message::OpenStashList => {
-                match self.repo.stash_list() {
-                    Ok(entries) => {
-                        if entries.is_empty() {
-                            self.status_message = Some("No stashes".into());
+                        let msg = format!("{e}");
+                        if msg.contains("Unmerged") || msg.contains("merge") {
+                            self.status_message = Some("Cannot undo commit during a merge — resolve or abort the merge first".into());
                         } else {
-                            self.overlay = Overlay::StashList {
-                                entries,
-                                selected: 0,
-                            };
-                        }
-                    }
-                    Err(e) => {
-                        self.status_message = Some(format!("Stash list failed: {e}"));
-                    }
-                }
-            }
-            Message::StashPop => {
-                if let Overlay::StashList { entries, selected } = &self.overlay {
-                    let idx = entries.get(*selected).map(|e| e.index);
-                    if let Some(idx) = idx {
-                        let sel = *selected;
-                        self.overlay = Overlay::None;
-                        match self.repo.stash_pop(idx) {
-                            Ok(()) => {
-                                self.status_message = Some(format!("Popped stash@{{{sel}}}"));
-                                self.refresh()?;
-                            }
-                            Err(e) => {
-                                self.status_message = Some(format!("Stash pop failed: {e}"));
-                            }
+                            self.status_message = Some(format!("Undo failed: {e}"));
                         }
                     }
                 }
             }
-            Message::StashApply => {
-                if let Overlay::StashList { entries, selected, .. } = &self.overlay {
-                    let idx = entries.get(*selected).map(|e| e.index);
-                    if let Some(idx) = idx {
-                        let sel = *selected;
-                        match self.repo.stash_apply(idx) {
-                            Ok(()) => {
-                                self.status_message = Some(format!("Applied stash@{{{sel}}}"));
-                                self.refresh()?;
-                            }
-                            Err(e) => {
-                                self.status_message = Some(format!("Stash apply failed: {e}"));
-                            }
-                        }
-                    }
+            PendingAction::DiscardChanges { path } => match self.repo.discard_changes(&path) {
+                Ok(()) => {
+                    self.status_message = Some(format!("Discarded: {path}"));
+                    self.refresh()?;
                 }
+                Err(e) => {
+                    self.status_message = Some(format!("Discard failed: {e}"));
+                }
+            },
+            PendingAction::StageEntireFile { path } => {
+                self.repo.stage_file(&path)?;
+                self.status_message = Some(format!("Staged: {path}"));
+                self.refresh()?;
+                self.load_selected_diff()?;
             }
-            Message::StashDrop => {
-                if let Overlay::StashList { entries, selected } = &self.overlay {
-                    let idx = entries.get(*selected).map(|e| e.index);
-                    let sel = *selected;
-                    if let Some(idx) = idx {
-                        self.overlay = Overlay::None;
-                        match self.repo.stash_drop(idx) {
-                            Ok(()) => {
-                                self.status_message = Some(format!("Dropped stash@{{{sel}}}"));
-                                // Reopen stash list
-                                if let Ok(new_entries) = self.repo.stash_list() {
-                                    if !new_entries.is_empty() {
-                                        self.overlay = Overlay::StashList {
-                                            selected: sel.min(new_entries.len().saturating_sub(1)),
-                                            entries: new_entries,
-                                        };
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                self.status_message = Some(format!("Stash drop failed: {e}"));
-                            }
-                        }
-                    }
-                }
+        }
+        Ok(())
+    }
+
+    fn handle_open_git_log(&mut self) {
+        match self.repo.get_log(100) {
+            Ok(entries) => {
+                self.overlay = Overlay::GitLog {
+                    entries,
+                    selected: 0,
+                    scroll: 0,
+                };
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Log failed: {e}"));
+            }
+        }
+    }
+
+    fn handle_dirty_checkout_stash(&mut self) -> Result<()> {
+        let branch = match &self.overlay {
+            Overlay::DirtyCheckout { branch, .. } => branch.clone(),
+            _ => return Ok(()),
+        };
+        self.overlay = Overlay::None;
+        match self.repo.stash_save(None) {
+            Ok(()) => {
+                self.do_checkout(&branch)?;
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Stash failed: {e}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_dirty_checkout_discard(&mut self) -> Result<()> {
+        let branch = match &self.overlay {
+            Overlay::DirtyCheckout { branch, .. } => branch.clone(),
+            _ => return Ok(()),
+        };
+        self.overlay = Overlay::None;
+        self.do_force_checkout(&branch)?;
+        Ok(())
+    }
+
+    // ── Rebase handlers ──────────────────────────────────────────────────────
+
+    fn handle_start_rebase(&mut self) {
+        if let Overlay::GitLog {
+            entries, selected, ..
+        } = &self.overlay
+        {
+            if *selected == 0 {
+                self.status_message = Some("Select a base commit (not the first one)".into());
+            } else {
+                let base_hash = entries[*selected].hash.clone();
+                let rebase_entries: Vec<RebaseEntry> = entries[..*selected]
+                    .iter()
+                    .rev()
+                    .map(|e| RebaseEntry {
+                        hash: e.hash.clone(),
+                        message: e.message.clone(),
+                        action: RebaseAction::Pick,
+                    })
+                    .collect();
+                self.overlay = Overlay::Rebase {
+                    entries: rebase_entries,
+                    selected: 0,
+                    base_hash,
+                };
+            }
+        }
+    }
+
+    fn handle_rebase_cycle_action(&mut self) {
+        if let Overlay::Rebase {
+            entries, selected, ..
+        } = &mut self.overlay
+        {
+            entries[*selected].action = entries[*selected].action.cycle();
+        }
+    }
+
+    fn handle_rebase_move_up(&mut self) {
+        if let Overlay::Rebase {
+            entries, selected, ..
+        } = &mut self.overlay
+        {
+            if *selected > 0 {
+                entries.swap(*selected, *selected - 1);
+                *selected -= 1;
+            }
+        }
+    }
+
+    fn handle_rebase_move_down(&mut self) {
+        if let Overlay::Rebase {
+            entries, selected, ..
+        } = &mut self.overlay
+        {
+            if *selected < entries.len().saturating_sub(1) {
+                entries.swap(*selected, *selected + 1);
+                *selected += 1;
+            }
+        }
+    }
+
+    fn handle_rebase_execute(&mut self) -> Result<()> {
+        if let Overlay::Rebase {
+            entries, base_hash, ..
+        } = &self.overlay
+        {
+            let workdir = self.repo.workdir().to_path_buf();
+            let todo: String = entries
+                .iter()
+                .map(|e| format!("{} {} {}", e.action.label(), e.hash, e.message))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let todo_path = workdir.join(".git/stage-rebase-todo");
+            let _ = std::fs::write(&todo_path, &todo);
+
+            let script = format!("#!/bin/sh\ncp {} \"$1\"", todo_path.display());
+            let script_path = workdir.join(".git/stage-rebase-editor.sh");
+            let _ = std::fs::write(&script_path, &script);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ =
+                    std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755));
             }
 
-            // ── Commit / Log ─────────────────────────────────────────────
-            Message::OpenCommit => {
-                if !self.repo.has_staged_changes() {
-                    self.status_message = Some("Nothing staged to commit".into());
-                    return Ok(());
-                }
-                let initial = self.saved_commit_msg.take().unwrap_or_default();
-                self.overlay = Overlay::CommitInput {
-                    input: TextInput::new(&initial),
-                    amend: false,
-                };
-            }
-            Message::OpenCommitAmend => {
-                self.overlay = Overlay::Confirm {
-                    message: "Amend the last commit? This will rewrite history.".into(),
-                    action: PendingAction::CommitAmend,
-                };
-            }
-            Message::ConfirmCommit => {
-                self.do_commit()?;
-            }
-            Message::ConfirmAction => {
-                let action = match &self.overlay {
-                    Overlay::Confirm { action, .. } => action.clone(),
-                    _ => return Ok(()),
-                };
-                self.overlay = Overlay::None;
-                match action {
-                    PendingAction::CommitAmend => {
-                        let initial = self.repo.last_commit_message().unwrap_or_default();
-                        self.overlay = Overlay::CommitInput {
-                            input: TextInput::new(&initial),
-                            amend: true,
-                        };
-                    }
-                    PendingAction::UndoLastCommit => {
-                        match self.repo.undo_last_commit() {
-                            Ok(msg) => {
-                                self.status_message =
-                                    Some("Undone last commit (message saved)".into());
-                                self.saved_commit_msg = Some(msg);
-                                self.refresh()?;
-                                if self.diff_state.is_some() {
-                                    self.load_selected_diff()?;
-                                }
-                            }
-                            Err(e) => {
-                                let msg = format!("{e}");
-                                if msg.contains("Unmerged") || msg.contains("merge") {
-                                    self.status_message = Some("Cannot undo commit during a merge — resolve or abort the merge first".into());
-                                } else {
-                                    self.status_message = Some(format!("Undo failed: {e}"));
-                                }
-                            }
-                        }
-                    }
-                    PendingAction::DiscardChanges { path } => {
-                        match self.repo.discard_changes(&path) {
-                            Ok(()) => {
-                                self.status_message = Some(format!("Discarded: {path}"));
-                                self.refresh()?;
-                            }
-                            Err(e) => {
-                                self.status_message = Some(format!("Discard failed: {e}"));
-                            }
-                        }
-                    }
-                    PendingAction::StageEntireFile { path } => {
-                        self.repo.stage_file(&path)?;
-                        self.status_message = Some(format!("Staged: {path}"));
-                        self.refresh()?;
-                        self.load_selected_diff()?;
-                    }
-                }
-            }
-            Message::DirtyCheckoutStash => {
-                let branch = match &self.overlay {
-                    Overlay::DirtyCheckout { branch, .. } => branch.clone(),
-                    _ => return Ok(()),
-                };
-                self.overlay = Overlay::None;
-                match self.repo.stash_save(None) {
-                    Ok(()) => {
-                        self.do_checkout(&branch)?;
-                    }
-                    Err(e) => {
-                        self.status_message = Some(format!("Stash failed: {e}"));
-                    }
-                }
-            }
-            Message::DirtyCheckoutDiscard => {
-                let branch = match &self.overlay {
-                    Overlay::DirtyCheckout { branch, .. } => branch.clone(),
-                    _ => return Ok(()),
-                };
-                self.overlay = Overlay::None;
-                self.do_force_checkout(&branch)?;
-            }
-            Message::UndoLastCommit => {
-                self.overlay = Overlay::Confirm {
-                    message: "Undo the last commit? Changes will be unstaged.".into(),
-                    action: PendingAction::UndoLastCommit,
-                };
-            }
-            Message::OpenGitLog => {
-                match self.repo.get_log(100) {
-                    Ok(entries) => {
-                        self.overlay = Overlay::GitLog {
-                            entries,
-                            selected: 0,
-                            scroll: 0,
-                        };
-                    }
-                    Err(e) => {
-                        self.status_message = Some(format!("Log failed: {e}"));
-                    }
-                }
-            }
-            Message::StartRebase => {
-                if let Overlay::GitLog { entries, selected, .. } = &self.overlay {
-                    if *selected == 0 {
-                        self.status_message = Some("Select a base commit (not the first one)".into());
-                    } else {
-                        // Commits from index 0 to selected-1 will be rebased onto selected
-                        let base_hash = entries[*selected].hash.clone();
-                        let rebase_entries: Vec<RebaseEntry> = entries[..*selected]
-                            .iter()
-                            .rev() // oldest first
-                            .map(|e| RebaseEntry {
-                                hash: e.hash.clone(),
-                                message: e.message.clone(),
-                                action: RebaseAction::Pick,
-                            })
-                            .collect();
-                        self.overlay = Overlay::Rebase {
-                            entries: rebase_entries,
-                            selected: 0,
-                            base_hash,
-                        };
-                    }
-                }
-            }
-            Message::RebaseCycleAction => {
-                if let Overlay::Rebase { entries, selected, .. } = &mut self.overlay {
-                    entries[*selected].action = entries[*selected].action.cycle();
-                }
-            }
-            Message::RebaseMoveUp => {
-                if let Overlay::Rebase { entries, selected, .. } = &mut self.overlay {
-                    if *selected > 0 {
-                        entries.swap(*selected, *selected - 1);
-                        *selected -= 1;
-                    }
-                }
-            }
-            Message::RebaseMoveDown => {
-                if let Overlay::Rebase { entries, selected, .. } = &mut self.overlay {
-                    if *selected < entries.len().saturating_sub(1) {
-                        entries.swap(*selected, *selected + 1);
-                        *selected += 1;
-                    }
-                }
-            }
-            Message::RebaseExecute => {
-                if let Overlay::Rebase { entries, base_hash, .. } = &self.overlay {
-                    let workdir = self.repo.workdir().to_path_buf();
-                    // Build the rebase todo
-                    let todo: String = entries
-                        .iter()
-                        .map(|e| format!("{} {} {}", e.action.label(), e.hash, e.message))
-                        .collect::<Vec<_>>()
-                        .join("\n");
+            let base = base_hash.clone();
+            self.overlay = Overlay::None;
 
-                    // Write to a temp script that will be used as GIT_SEQUENCE_EDITOR
-                    let todo_path = workdir.join(".git/stage-rebase-todo");
-                    let _ = std::fs::write(&todo_path, &todo);
+            let output = std::process::Command::new("git")
+                .args(["rebase", "-i", &base])
+                .env("GIT_SEQUENCE_EDITOR", script_path.to_str().unwrap_or(""))
+                .current_dir(&workdir)
+                .output();
 
-                    let script = format!(
-                        "#!/bin/sh\ncp {} \"$1\"",
-                        todo_path.display()
-                    );
-                    let script_path = workdir.join(".git/stage-rebase-editor.sh");
-                    let _ = std::fs::write(&script_path, &script);
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        let _ = std::fs::set_permissions(
-                            &script_path,
-                            std::fs::Permissions::from_mode(0o755),
+            let _ = std::fs::remove_file(&todo_path);
+            let _ = std::fs::remove_file(&script_path);
+
+            match output {
+                Ok(o) if o.status.success() => {
+                    self.status_message = Some("Rebase completed".into());
+                    self.refresh()?;
+                }
+                Ok(o) => {
+                    let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                    if self.repo.is_rebasing() {
+                        self.status_message = Some(
+                            "Rebase paused — resolve conflicts, then Space → R:continue / A:abort"
+                                .into(),
                         );
-                    }
-
-                    let base = base_hash.clone();
-                    self.overlay = Overlay::None;
-
-                    let output = std::process::Command::new("git")
-                        .args(["rebase", "-i", &base])
-                        .env("GIT_SEQUENCE_EDITOR", script_path.to_str().unwrap_or(""))
-                        .current_dir(&workdir)
-                        .output();
-
-                    // Cleanup
-                    let _ = std::fs::remove_file(&todo_path);
-                    let _ = std::fs::remove_file(&script_path);
-
-                    match output {
-                        Ok(o) if o.status.success() => {
-                            self.status_message = Some("Rebase completed".into());
-                            self.refresh()?;
-                        }
-                        Ok(o) => {
-                            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
-                            if self.repo.is_rebasing() {
-                                self.status_message = Some("Rebase paused — resolve conflicts, then Space → R:continue / A:abort".into());
-                                self.refresh()?;
-                            } else {
-                                self.status_message = Some(format!("Rebase failed: {err}"));
-                            }
-                        }
-                        Err(e) => {
-                            self.status_message = Some(format!("Rebase error: {e}"));
-                        }
-                    }
-                }
-            }
-            Message::RebaseContinue => {
-                if self.repo.is_rebasing() {
-                    match self.repo.rebase_continue() {
-                        Ok(msg) => {
-                            if self.repo.is_rebasing() {
-                                self.status_message = Some("Rebase paused — resolve next conflict, then continue".into());
-                            } else {
-                                self.status_message = Some(msg);
-                            }
-                            self.refresh()?;
-                            if self.diff_state.is_some() {
-                                self.load_selected_diff()?;
-                            }
-                        }
-                        Err(e) => {
-                            self.status_message = Some(format!("Rebase continue failed: {e}"));
-                        }
-                    }
-                } else {
-                    self.status_message = Some("No rebase in progress".into());
-                }
-            }
-            Message::RebaseAbort => {
-                if self.repo.is_rebasing() {
-                    match self.repo.rebase_abort() {
-                        Ok(msg) => {
-                            self.status_message = Some(msg);
-                            self.refresh()?;
-                            if self.diff_state.is_some() {
-                                self.load_selected_diff()?;
-                            }
-                        }
-                        Err(e) => {
-                            self.status_message = Some(format!("Rebase abort failed: {e}"));
-                        }
-                    }
-                } else {
-                    self.status_message = Some("No rebase in progress".into());
-                }
-            }
-            Message::ViewCommitDetail => {
-                if let Overlay::GitLog { entries, selected, .. } = &self.overlay {
-                    let selected = *selected;
-                    if let Some(entry) = entries.get(selected) {
-                        let hash = entry.hash.clone();
-                        let message = entry.message.clone();
-                        match self.repo.get_commit_diff_sides(&hash) {
-                            Ok(result) => {
-                                // Take log entries out of GitLog overlay
-                                let log_entries = if let Overlay::GitLog { entries, .. } = std::mem::replace(&mut self.overlay, Overlay::None) {
-                                    entries
-                                } else {
-                                    unreachable!()
-                                };
-                                self.overlay = Overlay::CommitDetail {
-                                    hash,
-                                    message,
-                                    left_lines: result.left_lines,
-                                    right_lines: result.right_lines,
-                                    hunks: result.hunks,
-                                    current_hunk: 0,
-                                    file_extensions: result.file_extensions,
-                                    scroll: 0,
-                                    viewport_height: 0,
-                                    log_entries,
-                                    log_selected: selected,
-                                };
-                            }
-                            Err(e) => {
-                                self.status_message = Some(format!("Diff failed: {e}"));
-                            }
-                        }
-                    }
-                }
-            }
-            Message::PrevCommitDetail | Message::NextCommitDetail => {
-                if let Overlay::CommitDetail { ref log_entries, log_selected, .. } = self.overlay {
-                    let new_idx = if matches!(msg, Message::PrevCommitDetail) {
-                        if log_selected == 0 { return Ok(()); } else { log_selected - 1 }
-                    } else if log_selected + 1 >= log_entries.len() {
-                        return Ok(());
+                        self.refresh()?;
                     } else {
-                        log_selected + 1
-                    };
-                    let hash = log_entries[new_idx].hash.clone();
-                    let message = log_entries[new_idx].message.clone();
-                    match self.repo.get_commit_diff_sides(&hash) {
-                        Ok(result) => {
-                            let log_entries = if let Overlay::CommitDetail { log_entries, .. } = std::mem::replace(&mut self.overlay, Overlay::None) {
-                                log_entries
-                            } else {
-                                unreachable!()
-                            };
-                            self.overlay = Overlay::CommitDetail {
-                                hash,
-                                message,
-                                left_lines: result.left_lines,
-                                right_lines: result.right_lines,
-                                hunks: result.hunks,
-                                current_hunk: 0,
-                                file_extensions: result.file_extensions,
-                                scroll: 0,
-                                viewport_height: 0,
-                                log_entries,
-                                log_selected: new_idx,
-                            };
-                        }
-                        Err(e) => {
-                            self.status_message = Some(format!("Diff failed: {e}"));
-                        }
+                        self.status_message = Some(format!("Rebase failed: {err}"));
                     }
                 }
-            }
-            Message::PrevHunkCommitDetail => {
-                if let Overlay::CommitDetail { ref hunks, ref mut current_hunk, ref mut scroll, viewport_height, .. } = self.overlay {
-                    if !hunks.is_empty() && *current_hunk > 0 {
-                        *current_hunk -= 1;
-                        let offset = viewport_height / 3;
-                        *scroll = hunks[*current_hunk].display_start.saturating_sub(offset);
-                    }
-                }
-            }
-            Message::NextHunkCommitDetail => {
-                if let Overlay::CommitDetail { ref hunks, ref mut current_hunk, ref mut scroll, viewport_height, .. } = self.overlay {
-                    if !hunks.is_empty() && *current_hunk + 1 < hunks.len() {
-                        *current_hunk += 1;
-                        let offset = viewport_height / 3;
-                        *scroll = hunks[*current_hunk].display_start.saturating_sub(offset);
-                    }
+                Err(e) => {
+                    self.status_message = Some(format!("Rebase error: {e}"));
                 }
             }
         }
         Ok(())
+    }
+
+    fn handle_rebase_continue(&mut self) -> Result<()> {
+        if self.repo.is_rebasing() {
+            match self.repo.rebase_continue() {
+                Ok(msg) => {
+                    if self.repo.is_rebasing() {
+                        self.status_message =
+                            Some("Rebase paused — resolve next conflict, then continue".into());
+                    } else {
+                        self.status_message = Some(msg);
+                    }
+                    self.refresh()?;
+                    if self.diff_state.is_some() {
+                        self.load_selected_diff()?;
+                    }
+                }
+                Err(e) => {
+                    self.status_message = Some(format!("Rebase continue failed: {e}"));
+                }
+            }
+        } else {
+            self.status_message = Some("No rebase in progress".into());
+        }
+        Ok(())
+    }
+
+    fn handle_rebase_abort(&mut self) -> Result<()> {
+        if self.repo.is_rebasing() {
+            match self.repo.rebase_abort() {
+                Ok(msg) => {
+                    self.status_message = Some(msg);
+                    self.refresh()?;
+                    if self.diff_state.is_some() {
+                        self.load_selected_diff()?;
+                    }
+                }
+                Err(e) => {
+                    self.status_message = Some(format!("Rebase abort failed: {e}"));
+                }
+            }
+        } else {
+            self.status_message = Some("No rebase in progress".into());
+        }
+        Ok(())
+    }
+
+    // ── Commit detail handlers ───────────────────────────────────────────────
+
+    fn handle_view_commit_detail(&mut self) {
+        if let Overlay::GitLog {
+            entries, selected, ..
+        } = &self.overlay
+        {
+            let selected = *selected;
+            if let Some(entry) = entries.get(selected) {
+                let hash = entry.hash.clone();
+                let message = entry.message.clone();
+                match self.repo.get_commit_diff_sides(&hash) {
+                    Ok(result) => {
+                        let log_entries = if let Overlay::GitLog { entries, .. } =
+                            std::mem::replace(&mut self.overlay, Overlay::None)
+                        {
+                            entries
+                        } else {
+                            unreachable!()
+                        };
+                        self.overlay = Overlay::CommitDetail {
+                            hash,
+                            message,
+                            left_lines: result.left_lines,
+                            right_lines: result.right_lines,
+                            hunks: result.hunks,
+                            current_hunk: 0,
+                            file_extensions: result.file_extensions,
+                            scroll: 0,
+                            viewport_height: 0,
+                            log_entries,
+                            log_selected: selected,
+                        };
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Diff failed: {e}"));
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_navigate_commit_detail(&mut self, forward: bool) -> Result<()> {
+        if let Overlay::CommitDetail {
+            ref log_entries,
+            log_selected,
+            ..
+        } = self.overlay
+        {
+            let new_idx = if forward {
+                if log_selected + 1 >= log_entries.len() {
+                    return Ok(());
+                }
+                log_selected + 1
+            } else {
+                if log_selected == 0 {
+                    return Ok(());
+                }
+                log_selected - 1
+            };
+            let hash = log_entries[new_idx].hash.clone();
+            let message = log_entries[new_idx].message.clone();
+            match self.repo.get_commit_diff_sides(&hash) {
+                Ok(result) => {
+                    let log_entries = if let Overlay::CommitDetail { log_entries, .. } =
+                        std::mem::replace(&mut self.overlay, Overlay::None)
+                    {
+                        log_entries
+                    } else {
+                        unreachable!()
+                    };
+                    self.overlay = Overlay::CommitDetail {
+                        hash,
+                        message,
+                        left_lines: result.left_lines,
+                        right_lines: result.right_lines,
+                        hunks: result.hunks,
+                        current_hunk: 0,
+                        file_extensions: result.file_extensions,
+                        scroll: 0,
+                        viewport_height: 0,
+                        log_entries,
+                        log_selected: new_idx,
+                    };
+                }
+                Err(e) => {
+                    self.status_message = Some(format!("Diff failed: {e}"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_prev_hunk_commit_detail(&mut self) {
+        if let Overlay::CommitDetail {
+            ref hunks,
+            ref mut current_hunk,
+            ref mut scroll,
+            viewport_height,
+            ..
+        } = self.overlay
+        {
+            if !hunks.is_empty() && *current_hunk > 0 {
+                *current_hunk -= 1;
+                let offset = viewport_height / 3;
+                *scroll = hunks[*current_hunk].display_start.saturating_sub(offset);
+            }
+        }
+    }
+
+    fn handle_next_hunk_commit_detail(&mut self) {
+        if let Overlay::CommitDetail {
+            ref hunks,
+            ref mut current_hunk,
+            ref mut scroll,
+            viewport_height,
+            ..
+        } = self.overlay
+        {
+            if !hunks.is_empty() && *current_hunk + 1 < hunks.len() {
+                *current_hunk += 1;
+                let offset = viewport_height / 3;
+                *scroll = hunks[*current_hunk].display_start.saturating_sub(offset);
+            }
+        }
     }
 
     fn do_commit(&mut self) -> Result<()> {
@@ -1497,7 +1662,11 @@ impl App {
                 }
                 return Ok(());
             }
-            Overlay::BranchList { selected, creating: None, .. } => {
+            Overlay::BranchList {
+                selected,
+                creating: None,
+                ..
+            } => {
                 if *selected > 0 {
                     *selected -= 1;
                 }
@@ -1538,14 +1707,20 @@ impl App {
             }
             return Ok(());
         }
-        let Some(ds) = &mut self.diff_state else { return Ok(()) };
+        let Some(ds) = &mut self.diff_state else {
+            return Ok(());
+        };
         match ds.view_mode {
             DiffViewMode::HunkNav => {
                 ds.scroll = ds.scroll.saturating_sub(1);
                 Self::update_current_hunk_from_scroll(ds);
             }
             DiffViewMode::LineNav => {
-                if let Some(pos) = ds.hunk_changed_rows.iter().position(|&r| r == ds.cursor_line) {
+                if let Some(pos) = ds
+                    .hunk_changed_rows
+                    .iter()
+                    .position(|&r| r == ds.cursor_line)
+                {
                     if pos > 0 {
                         ds.cursor_line = ds.hunk_changed_rows[pos - 1];
                         Self::keep_cursor_visible(ds);
@@ -1582,20 +1757,29 @@ impl App {
                 }
                 return Ok(());
             }
-            Overlay::BranchList { entries, selected, creating: None, .. } => {
+            Overlay::BranchList {
+                entries,
+                selected,
+                creating: None,
+                ..
+            } => {
                 if *selected < entries.len().saturating_sub(1) {
                     *selected += 1;
                 }
                 return Ok(());
             }
             Overlay::BranchList { .. } => return Ok(()),
-            Overlay::CommitDetail { left_lines, scroll, .. } => {
+            Overlay::CommitDetail {
+                left_lines, scroll, ..
+            } => {
                 if *scroll < left_lines.len().saturating_sub(1) {
                     *scroll += 1;
                 }
                 return Ok(());
             }
-            Overlay::Rebase { entries, selected, .. } => {
+            Overlay::Rebase {
+                entries, selected, ..
+            } => {
                 if *selected < entries.len().saturating_sub(1) {
                     *selected += 1;
                 }
@@ -1626,7 +1810,9 @@ impl App {
             }
             return Ok(());
         }
-        let Some(ds) = &mut self.diff_state else { return Ok(()) };
+        let Some(ds) = &mut self.diff_state else {
+            return Ok(());
+        };
         match ds.view_mode {
             DiffViewMode::HunkNav => {
                 if ds.scroll < ds.max_scroll {
@@ -1635,7 +1821,11 @@ impl App {
                 Self::update_current_hunk_from_scroll(ds);
             }
             DiffViewMode::LineNav => {
-                if let Some(pos) = ds.hunk_changed_rows.iter().position(|&r| r == ds.cursor_line) {
+                if let Some(pos) = ds
+                    .hunk_changed_rows
+                    .iter()
+                    .position(|&r| r == ds.cursor_line)
+                {
                     if pos < ds.hunk_changed_rows.len() - 1 {
                         ds.cursor_line = ds.hunk_changed_rows[pos + 1];
                         Self::keep_cursor_visible(ds);
@@ -1688,7 +1878,8 @@ impl App {
                 return Ok(());
             }
             if ds.selected_lines.is_empty() {
-                self.status_message = Some("No lines selected — use Enter/→ to select lines first".into());
+                self.status_message =
+                    Some("No lines selected — use Enter/→ to select lines first".into());
                 return Ok(());
             }
             let user_selected = ds.selected_lines.clone();
@@ -1745,21 +1936,28 @@ impl App {
     }
 
     pub fn filtered_entries(&self) -> Vec<(usize, &FileEntry)> {
-        self.file_entries.iter().enumerate().filter(|(_, e)| {
-            match &self.file_filter {
+        self.file_entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| match &self.file_filter {
                 None => true,
                 Some(f) if f.is_empty() => true,
                 Some(f) => {
                     let lower = e.path.to_lowercase();
-                    f.to_lowercase().split_whitespace().all(|w| lower.contains(w))
+                    f.to_lowercase()
+                        .split_whitespace()
+                        .all(|w| lower.contains(w))
                 }
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     fn get_yank_text(&self) -> Option<String> {
         // In git log overlay, yank the selected commit hash
-        if let Overlay::GitLog { entries, selected, .. } = &self.overlay {
+        if let Overlay::GitLog {
+            entries, selected, ..
+        } = &self.overlay
+        {
             return entries.get(*selected).map(|e| e.hash.clone());
         }
         if let Some(ds) = &self.diff_state {
@@ -1770,7 +1968,8 @@ impl App {
                 } else {
                     ds.selected_lines.iter().copied().collect()
                 };
-                let lines: Vec<String> = rows.iter()
+                let lines: Vec<String> = rows
+                    .iter()
                     .filter_map(|&row| ds.right_lines.get(row).map(|l| l.content.clone()))
                     .collect();
                 if !lines.is_empty() {
@@ -1782,7 +1981,9 @@ impl App {
                 if let Some(hunk) = ds.hunks.get(ds.current_hunk) {
                     let lines: Vec<String> = ds.right_lines[hunk.display_start..hunk.display_end]
                         .iter()
-                        .filter(|l| l.kind == git::DiffLineKind::Added || l.kind == git::DiffLineKind::Equal)
+                        .filter(|l| {
+                            l.kind == git::DiffLineKind::Added || l.kind == git::DiffLineKind::Equal
+                        })
                         .map(|l| l.content.clone())
                         .collect();
                     if !lines.is_empty() {
@@ -1798,14 +1999,15 @@ impl App {
         None
     }
 
-
     /// Scroll just enough to keep cursor_line visible, placing it 1/3 from top/bottom edge.
     fn keep_cursor_visible(ds: &mut DiffState) {
         let margin = ds.viewport_height / 3;
         if ds.cursor_line < ds.scroll + margin {
             ds.scroll = ds.cursor_line.saturating_sub(margin);
         } else if ds.cursor_line >= ds.scroll + ds.viewport_height.saturating_sub(margin) {
-            ds.scroll = ds.cursor_line.saturating_sub(ds.viewport_height.saturating_sub(margin).saturating_sub(1));
+            ds.scroll = ds
+                .cursor_line
+                .saturating_sub(ds.viewport_height.saturating_sub(margin).saturating_sub(1));
         }
     }
 
@@ -1899,9 +2101,8 @@ impl App {
                             left_name: parsed.left_name.clone(),
                             right_name: parsed.right_name.clone(),
                         });
-                        self.status_message = Some(
-                            "Conflict: Space=actions  ↑/↓=navigate  ←/Esc=back".into(),
-                        );
+                        self.status_message =
+                            Some("Conflict: Space=actions  ↑/↓=navigate  ←/Esc=back".into());
                         return Ok(());
                     }
                 }
@@ -1914,7 +2115,11 @@ impl App {
             }
 
             // Refresh blame data when file changes
-            let file_changed = self.diff_state.as_ref().map(|ds| ds.file_path != path).unwrap_or(true);
+            let file_changed = self
+                .diff_state
+                .as_ref()
+                .map(|ds| ds.file_path != path)
+                .unwrap_or(true);
             if file_changed && self.show_blame {
                 self.blame_data = self.repo.get_blame(&path).ok();
             }
@@ -1922,18 +2127,21 @@ impl App {
             let staged = matches!(status, FileStatus::Staged(_));
             match self.repo.get_diff_content(&path, staged) {
                 Ok((old, new)) => {
-                    let (left_lines, right_lines, hunks) =
-                        git::compute_diff(&old, &new);
+                    let (left_lines, right_lines, hunks) = git::compute_diff(&old, &new);
                     let max_scroll = left_lines.len().max(right_lines.len());
                     // Preserve state when reloading the same file
                     let prev = self.diff_state.as_ref().filter(|ds| ds.file_path == path);
                     let prev_hunk = prev
                         .map(|ds| ds.current_hunk.min(hunks.len().saturating_sub(1)))
                         .unwrap_or(0);
-                    let prev_view_mode = prev.map(|ds| ds.view_mode).unwrap_or(DiffViewMode::HunkNav);
+                    let prev_view_mode =
+                        prev.map(|ds| ds.view_mode).unwrap_or(DiffViewMode::HunkNav);
                     let prev_cursor = prev.map(|ds| ds.cursor_line).unwrap_or(0);
-                    let prev_selected = prev.map(|ds| ds.selected_lines.clone()).unwrap_or_default();
-                    let prev_hunk_rows = prev.map(|ds| ds.hunk_changed_rows.clone()).unwrap_or_default();
+                    let prev_selected =
+                        prev.map(|ds| ds.selected_lines.clone()).unwrap_or_default();
+                    let prev_hunk_rows = prev
+                        .map(|ds| ds.hunk_changed_rows.clone())
+                        .unwrap_or_default();
                     let prev_viewport = prev.map(|ds| ds.viewport_height).unwrap_or(24);
                     let offset = prev_viewport / 3;
                     let scroll = hunks
@@ -1970,87 +2178,11 @@ impl App {
     }
 }
 
-struct ParsedConflicts {
-    prefix: Vec<String>,
-    sections: Vec<ConflictSection>,
-    left_name: String,
-    right_name: String,
-}
-
-fn parse_conflicts(content: &str) -> Option<ParsedConflicts> {
-    let lines: Vec<&str> = content.lines().collect();
-    let mut sections = Vec::new();
-    let mut prefix = Vec::new();
-    let mut i = 0;
-    let mut in_prefix = true;
-    let mut left_name = String::new();
-    let mut right_name = String::new();
-
-    while i < lines.len() {
-        if lines[i].starts_with("<<<<<<<") {
-            in_prefix = false;
-            // Extract left branch name from "<<<<<<< NAME"
-            if left_name.is_empty() {
-                left_name = lines[i].trim_start_matches('<').trim().to_string();
-            }
-            let mut ours = Vec::new();
-            i += 1;
-            while i < lines.len() && !lines[i].starts_with("=======") {
-                ours.push(lines[i].to_string());
-                i += 1;
-            }
-            i += 1; // skip =======
-            let mut theirs = Vec::new();
-            while i < lines.len() && !lines[i].starts_with(">>>>>>>") {
-                theirs.push(lines[i].to_string());
-                i += 1;
-            }
-            // Extract right branch name from ">>>>>>> NAME"
-            if i < lines.len() && right_name.is_empty() {
-                right_name = lines[i].trim_start_matches('>').trim().to_string();
-            }
-            i += 1; // skip >>>>>>>
-            // Collect suffix lines until next conflict or end
-            let mut suffix = Vec::new();
-            while i < lines.len() && !lines[i].starts_with("<<<<<<<") {
-                suffix.push(lines[i].to_string());
-                i += 1;
-            }
-            sections.push(ConflictSection {
-                ours,
-                theirs,
-                resolution: ConflictResolution::Unresolved,
-                suffix,
-            });
-        } else {
-            if in_prefix {
-                prefix.push(lines[i].to_string());
-            }
-            i += 1;
-        }
-    }
-
-    if sections.is_empty() {
-        None
-    } else {
-        if left_name.is_empty() {
-            left_name = "left".to_string();
-        }
-        if right_name.is_empty() {
-            right_name = "right".to_string();
-        }
-        Some(ParsedConflicts {
-            prefix,
-            sections,
-            left_name,
-            right_name,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conflict::parse_conflicts;
+    use crate::text_input::char_to_byte_idx;
 
     // ── TextInput ──
 
@@ -2277,13 +2409,17 @@ mod tests {
 
     #[test]
     fn test_parse_conflicts_single_conflict() {
-        let content = "before\n<<<<<<< HEAD\nours line\n=======\ntheirs line\n>>>>>>> branch\nafter\n";
+        let content =
+            "before\n<<<<<<< HEAD\nours line\n=======\ntheirs line\n>>>>>>> branch\nafter\n";
         let parsed = parse_conflicts(content).unwrap();
         assert_eq!(parsed.prefix, vec!["before"]);
         assert_eq!(parsed.sections.len(), 1);
         assert_eq!(parsed.sections[0].ours, vec!["ours line"]);
         assert_eq!(parsed.sections[0].theirs, vec!["theirs line"]);
-        assert_eq!(parsed.sections[0].resolution, ConflictResolution::Unresolved);
+        assert_eq!(
+            parsed.sections[0].resolution,
+            ConflictResolution::Unresolved
+        );
         assert_eq!(parsed.sections[0].suffix, vec!["after"]);
         assert_eq!(parsed.left_name, "HEAD");
         assert_eq!(parsed.right_name, "branch");
@@ -2324,7 +2460,10 @@ end";
         let parsed = parse_conflicts(content).unwrap();
         assert!(parsed.prefix.is_empty());
         assert_eq!(parsed.sections[0].ours, vec!["our line 1", "our line 2"]);
-        assert_eq!(parsed.sections[0].theirs, vec!["their line 1", "their line 2", "their line 3"]);
+        assert_eq!(
+            parsed.sections[0].theirs,
+            vec!["their line 1", "their line 2", "their line 3"]
+        );
     }
 
     #[test]
@@ -2362,7 +2501,10 @@ end";
     }
 
     fn filtered_paths(app: &App) -> Vec<String> {
-        app.filtered_entries().iter().map(|(_, e)| e.path.clone()).collect()
+        app.filtered_entries()
+            .iter()
+            .map(|(_, e)| e.path.clone())
+            .collect()
     }
 
     #[test]
@@ -2465,9 +2607,18 @@ end";
     fn make_diff_state_with_hunks() -> DiffState {
         let mut ds = make_diff_state(30, 0, 0);
         ds.hunks = vec![
-            git::Hunk { display_start: 5, display_end: 10 },
-            git::Hunk { display_start: 20, display_end: 25 },
-            git::Hunk { display_start: 40, display_end: 50 },
+            git::Hunk {
+                display_start: 5,
+                display_end: 10,
+            },
+            git::Hunk {
+                display_start: 20,
+                display_end: 25,
+            },
+            git::Hunk {
+                display_start: 40,
+                display_end: 50,
+            },
         ];
         ds
     }
@@ -2533,7 +2684,11 @@ end";
         let mut app = App::new(&tr.path_str()).unwrap();
         // Select the untracked file
         app.header_selected = false;
-        let idx = app.file_entries.iter().position(|e| e.path == "new.txt").unwrap();
+        let idx = app
+            .file_entries
+            .iter()
+            .position(|e| e.path == "new.txt")
+            .unwrap();
         app.selected_index = idx;
         app.update(Message::StageFile).unwrap();
         assert!(app.status_message.as_ref().unwrap().contains("Staged"));
@@ -2551,7 +2706,11 @@ end";
         }
         let mut app = App::new(&tr.path_str()).unwrap();
         app.header_selected = false;
-        let idx = app.file_entries.iter().position(|e| e.path == "new.txt").unwrap();
+        let idx = app
+            .file_entries
+            .iter()
+            .position(|e| e.path == "new.txt")
+            .unwrap();
         app.selected_index = idx;
         app.update(Message::UnstageFile).unwrap();
         assert!(app.status_message.as_ref().unwrap().contains("Unstaged"));
@@ -2562,7 +2721,10 @@ end";
         let tr = crate::git::test_helpers::TestRepo::with_initial_commit();
         let mut app = App::new(&tr.path_str()).unwrap();
         app.update(Message::OpenCommit).unwrap();
-        assert_eq!(app.status_message.as_deref(), Some("Nothing staged to commit"));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Nothing staged to commit")
+        );
     }
 
     #[test]

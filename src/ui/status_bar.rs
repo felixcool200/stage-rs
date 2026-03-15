@@ -41,7 +41,10 @@ pub fn render_header(app: &App, frame: &mut Frame, area: Rect) {
         ),
     ]);
 
-    frame.render_widget(Paragraph::new(line).style(Style::default().bg(app.theme.bg)), area);
+    frame.render_widget(
+        Paragraph::new(line).style(Style::default().bg(app.theme.bg)),
+        area,
+    );
 }
 
 pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
@@ -57,15 +60,13 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         (Panel::DiffView, true) => ("SELECT", app.theme.magenta),
     };
 
-    let mut spans = vec![
-        Span::styled(
-            format!(" {mode_label} "),
-            Style::default()
-                .fg(app.theme.black)
-                .bg(mode_bg)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ];
+    let mut spans = vec![Span::styled(
+        format!(" {mode_label} "),
+        Style::default()
+            .fg(app.theme.black)
+            .bg(mode_bg)
+            .add_modifier(Modifier::BOLD),
+    )];
 
     if let Some(ds) = &app.diff_state {
         spans.push(Span::styled(
@@ -82,7 +83,11 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             DiffViewMode::LineNav => {
                 let sel = ds.selected_lines.len();
                 let total = ds.hunk_changed_rows.len();
-                let verb = if ds.is_staged { "to unstage" } else { "selected" };
+                let verb = if ds.is_staged {
+                    "to unstage"
+                } else {
+                    "selected"
+                };
                 spans.push(Span::styled(
                     format!("{sel}/{total} lines {verb} "),
                     Style::default().fg(app.theme.magenta),
@@ -104,14 +109,15 @@ pub fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
         (Panel::DiffView, false) => {
             " | ↑/↓:scroll Shift+↑/↓:hunks Enter:lines Tab:files Space:commands "
         }
-        (Panel::DiffView, true) => {
-            " | ↑/↓:lines Enter:toggle Esc:back Space:commands "
-        }
+        (Panel::DiffView, true) => " | ↑/↓:lines Enter:toggle Esc:back Space:commands ",
     };
     spans.push(Span::styled(
         nav_hint,
         Style::default().fg(app.theme.fg_dim),
     ));
 
-    frame.render_widget(Paragraph::new(Line::from(spans)).style(Style::default().bg(app.theme.bg)), area);
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(app.theme.bg)),
+        area,
+    );
 }

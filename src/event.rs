@@ -1,5 +1,6 @@
-use crate::app::{App, DiffViewMode, Message, Overlay, Panel, TextInput};
+use crate::app::{App, DiffViewMode, Message, Overlay, Panel};
 use crate::keymap::{self, InputContext};
+use crate::text_input::TextInput;
 use color_eyre::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use std::time::Duration;
@@ -14,8 +15,8 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
         return Ok(Some(Message::AutoRefresh));
     }
 
-    let remaining = Duration::from_secs(AUTO_REFRESH_SECS)
-        .saturating_sub(app.last_refresh.elapsed());
+    let remaining =
+        Duration::from_secs(AUTO_REFRESH_SECS).saturating_sub(app.last_refresh.elapsed());
     let timeout = remaining.min(Duration::from_millis(250));
 
     if !event::poll(timeout)? {
@@ -40,7 +41,9 @@ pub fn poll_event(app: &App) -> Result<Option<Message>> {
             Overlay::BranchList { .. } => handle_branch_list(key.code),
             Overlay::CommitDetail { .. } => handle_commit_detail(key.code, key.modifiers),
             Overlay::Rebase { .. } => handle_rebase(key.code, key.modifiers),
-            Overlay::DirtyCheckout { has_conflicts, .. } => handle_dirty_checkout(key.code, *has_conflicts),
+            Overlay::DirtyCheckout { has_conflicts, .. } => {
+                handle_dirty_checkout(key.code, *has_conflicts)
+            }
             Overlay::None => unreachable!(),
         });
     }
@@ -75,9 +78,8 @@ fn handle_commit_input(modifiers: KeyModifiers, code: KeyCode) -> Option<Message
     match (modifiers, code) {
         (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Message::CloseOverlay),
         // Ctrl+S or Ctrl+D to confirm
-        (KeyModifiers::CONTROL, KeyCode::Char('s')) | (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
-            Some(Message::ConfirmCommit)
-        }
+        (KeyModifiers::CONTROL, KeyCode::Char('s'))
+        | (KeyModifiers::CONTROL, KeyCode::Char('d')) => Some(Message::ConfirmCommit),
         (_, KeyCode::Esc) => Some(Message::CloseOverlay),
         _ => None, // Text editing keys handled separately
     }

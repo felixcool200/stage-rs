@@ -9,12 +9,14 @@ use color_eyre::Result;
 use git2::Repository;
 use std::path::Path;
 
-pub use diff::{apply_hunk, apply_lines, changed_rows_in_hunk, compute_diff, DiffLine, DiffLineKind, Hunk};
+pub use diff::{
+    apply_hunk, apply_lines, changed_rows_in_hunk, compute_diff, DiffLine, DiffLineKind, Hunk,
+};
 pub use log::{BlameLine, CommitDiffResult, LogEntry};
 pub use operations::{BranchEntry, StashEntry};
-pub use status::{FileEntry, FileStatus};
 #[cfg(test)]
 pub use status::ChangeKind;
+pub use status::{FileEntry, FileStatus};
 
 pub struct GitRepo {
     pub repo: Repository,
@@ -91,7 +93,9 @@ impl GitRepo {
     }
 
     pub fn workdir(&self) -> &Path {
-        self.repo.workdir().expect("bare repositories not supported")
+        self.repo
+            .workdir()
+            .expect("bare repositories not supported")
     }
 
     pub fn stash_save(&mut self, message: Option<&str>) -> Result<()> {
@@ -175,6 +179,8 @@ impl GitRepo {
             Some(oid) => oid,
             None => return (0, 0),
         };
-        self.repo.graph_ahead_behind(local_oid, upstream_oid).unwrap_or((0, 0))
+        self.repo
+            .graph_ahead_behind(local_oid, upstream_oid)
+            .unwrap_or((0, 0))
     }
 }

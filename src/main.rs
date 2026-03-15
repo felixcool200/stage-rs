@@ -1,8 +1,11 @@
 mod app;
+mod clipboard;
+mod conflict;
 mod event;
 mod git;
 mod keymap;
 mod syntax;
+mod text_input;
 mod theme;
 mod ui;
 
@@ -71,13 +74,23 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
             // body height = term_height - header(1) - footer(1), each diff panel has 2 border rows
             ds.viewport_height = term_height.saturating_sub(4);
         }
-        if let Overlay::CommitDetail { ref mut viewport_height, .. } = app.overlay {
+        if let Overlay::CommitDetail {
+            ref mut viewport_height,
+            ..
+        } = app.overlay
+        {
             // popup is 80% of terminal height, minus 2 border rows
             *viewport_height = (term_height * 80 / 100).saturating_sub(2);
         }
         terminal.draw(|frame| ui::render(app, frame))?;
 
-        let branch_creating = matches!(app.overlay, Overlay::BranchList { creating: Some(_), .. });
+        let branch_creating = matches!(
+            app.overlay,
+            Overlay::BranchList {
+                creating: Some(_),
+                ..
+            }
+        );
         if app.pending_editor.is_some() {
             spawn_editor(terminal, app)?;
         } else if app.pending_terminal_cmd.is_some() {
@@ -109,6 +122,20 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     Ok(())
 }
 
+fn run_with_suspended_tui(
+    terminal: &mut ratatui::DefaultTerminal,
+    command: &mut std::process::Command,
+) -> Result<std::process::ExitStatus> {
+    ratatui::restore();
+    let status = command
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status();
+    *terminal = ratatui::init();
+    status.map_err(Into::into)
+}
+
 fn spawn_editor(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let req = app.pending_editor.take().unwrap();
     let workdir = app.repo.workdir().to_path_buf();
@@ -118,26 +145,15 @@ fn spawn_editor(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Resul
         .or_else(|_| std::env::var("EDITOR"))
         .unwrap_or_else(|_| "vi".into());
 
-    // Suspend TUI
-    ratatui::restore();
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c").arg(format!(
+        "{} +{} '{}'",
+        editor,
+        req.line_number,
+        full_path.display()
+    ));
 
-    let status = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(format!(
-            "{} +{} '{}'",
-            editor,
-            req.line_number,
-            full_path.display()
-        ))
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status();
-
-    // Restore TUI
-    *terminal = ratatui::init();
-
-    match status {
+    match run_with_suspended_tui(terminal, &mut cmd) {
         Ok(s) if s.success() => {
             app.status_message = Some(format!("Editor closed: {}", req.file_path));
         }
@@ -152,30 +168,17 @@ fn spawn_editor(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Resul
         }
     }
 
-    // Reload file list and diff
     app.update(app::Message::Refresh)?;
-
     Ok(())
 }
 
 fn run_terminal_cmd(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let cmd = app.pending_terminal_cmd.take().unwrap();
 
-    // Suspend TUI so the command can use the terminal (e.g. SSH passphrase prompt)
-    ratatui::restore();
+    let mut command = std::process::Command::new(&cmd.program);
+    command.args(&cmd.args).current_dir(&cmd.workdir);
 
-    let status = std::process::Command::new(&cmd.program)
-        .args(&cmd.args)
-        .current_dir(&cmd.workdir)
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status();
-
-    // Restore TUI
-    *terminal = ratatui::init();
-
-    match status {
+    match run_with_suspended_tui(terminal, &mut command) {
         Ok(s) if s.success() => {
             app.status_message = Some(cmd.success_msg);
         }
@@ -191,7 +194,7 @@ fn run_terminal_cmd(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> R
     Ok(())
 }
 
-fn poll_which_key(app: &mut App) -> Result<Option<app::Message>> {
+fn poll_key() -> Result<Option<crossterm::event::KeyEvent>> {
     if !crossterm::event::poll(Duration::from_millis(250))? {
         return Ok(None);
     }
@@ -201,6 +204,13 @@ fn poll_which_key(app: &mut App) -> Result<Option<app::Message>> {
     if key.kind != crossterm::event::KeyEventKind::Press {
         return Ok(None);
     }
+    Ok(Some(key))
+}
+
+fn poll_which_key(app: &mut App) -> Result<Option<app::Message>> {
+    let Some(key) = poll_key()? else {
+        return Ok(None);
+    };
 
     let entries = app.which_key.take().unwrap();
 
@@ -215,19 +225,17 @@ fn poll_which_key(app: &mut App) -> Result<Option<app::Message>> {
 }
 
 fn poll_branch_create(app: &mut App) -> Result<Option<app::Message>> {
-    if !crossterm::event::poll(Duration::from_millis(250))? {
-        return Ok(None);
-    }
-    let crossterm::event::Event::Key(key) = crossterm::event::read()? else {
+    let Some(key) = poll_key()? else {
         return Ok(None);
     };
-    if key.kind != crossterm::event::KeyEventKind::Press {
-        return Ok(None);
-    }
+
     use crossterm::event::{KeyCode, KeyModifiers};
     match (key.modifiers, key.code) {
         (_, KeyCode::Esc) => {
-            if let Overlay::BranchList { ref mut creating, .. } = app.overlay {
+            if let Overlay::BranchList {
+                ref mut creating, ..
+            } = app.overlay
+            {
                 *creating = None;
             }
         }
@@ -235,12 +243,22 @@ fn poll_branch_create(app: &mut App) -> Result<Option<app::Message>> {
             return Ok(Some(app::Message::ConfirmCreateBranch));
         }
         (_, KeyCode::Backspace) => {
-            if let Overlay::BranchList { creating: Some(ref mut name), .. } = app.overlay {
+            if let Overlay::BranchList {
+                creating: Some(ref mut name),
+                ..
+            } = app.overlay
+            {
                 name.pop();
             }
         }
-        (_, KeyCode::Char(ch)) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
-            if let Overlay::BranchList { creating: Some(ref mut name), .. } = app.overlay {
+        (_, KeyCode::Char(ch))
+            if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+        {
+            if let Overlay::BranchList {
+                creating: Some(ref mut name),
+                ..
+            } = app.overlay
+            {
                 name.push(ch);
             }
         }
@@ -253,17 +271,9 @@ fn poll_branch_create(app: &mut App) -> Result<Option<app::Message>> {
 }
 
 fn poll_with_filter(app: &mut App) -> Result<Option<app::Message>> {
-    if !crossterm::event::poll(Duration::from_millis(250))? {
-        return Ok(None);
-    }
-
-    let crossterm::event::Event::Key(key) = crossterm::event::read()? else {
+    let Some(key) = poll_key()? else {
         return Ok(None);
     };
-
-    if key.kind != crossterm::event::KeyEventKind::Press {
-        return Ok(None);
-    }
 
     use crossterm::event::{KeyCode, KeyModifiers};
     match (key.modifiers, key.code) {
@@ -285,7 +295,9 @@ fn poll_with_filter(app: &mut App) -> Result<Option<app::Message>> {
                 f.pop();
             }
         }
-        (_, KeyCode::Char(ch)) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
+        (_, KeyCode::Char(ch))
+            if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+        {
             if let Some(ref mut f) = app.file_filter {
                 f.push(ch);
             }
@@ -304,17 +316,9 @@ fn poll_with_filter(app: &mut App) -> Result<Option<app::Message>> {
 }
 
 fn poll_with_text_input(app: &mut App) -> Result<Option<app::Message>> {
-    if !crossterm::event::poll(Duration::from_millis(250))? {
-        return Ok(None);
-    }
-
-    let crossterm::event::Event::Key(key) = crossterm::event::read()? else {
+    let Some(key) = poll_key()? else {
         return Ok(None);
     };
-
-    if key.kind != crossterm::event::KeyEventKind::Press {
-        return Ok(None);
-    }
 
     // First try the overlay handler for control keys
     if let Some(msg) = event::poll_event_overlay_only(key) {

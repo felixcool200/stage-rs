@@ -77,38 +77,65 @@ mod tests {
     #[test]
     fn test_ctrl_c_quits_in_all_contexts() {
         let ctrl_c = key_mod(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(matches!(resolve(InputContext::FileList, ctrl_c), Some(Message::Quit)));
-        assert!(matches!(resolve(InputContext::DiffHunkNav, ctrl_c), Some(Message::Quit)));
-        assert!(matches!(resolve(InputContext::DiffLineNav, ctrl_c), Some(Message::Quit)));
+        assert!(matches!(
+            resolve(InputContext::FileList, ctrl_c),
+            Some(Message::Quit)
+        ));
+        assert!(matches!(
+            resolve(InputContext::DiffHunkNav, ctrl_c),
+            Some(Message::Quit)
+        ));
+        assert!(matches!(
+            resolve(InputContext::DiffLineNav, ctrl_c),
+            Some(Message::Quit)
+        ));
     }
 
     #[test]
     fn test_q_quits_in_filelist_and_hunknav() {
         let q = key(KeyCode::Char('q'));
-        assert!(matches!(resolve(InputContext::FileList, q), Some(Message::Quit)));
-        assert!(matches!(resolve(InputContext::DiffHunkNav, q), Some(Message::Quit)));
+        assert!(matches!(
+            resolve(InputContext::FileList, q),
+            Some(Message::Quit)
+        ));
+        assert!(matches!(
+            resolve(InputContext::DiffHunkNav, q),
+            Some(Message::Quit)
+        ));
     }
 
     #[test]
     fn test_q_exits_line_mode() {
         let q = key(KeyCode::Char('q'));
-        assert!(matches!(resolve(InputContext::DiffLineNav, q), Some(Message::ExitLineMode)));
+        assert!(matches!(
+            resolve(InputContext::DiffLineNav, q),
+            Some(Message::ExitLineMode)
+        ));
     }
 
     #[test]
     fn test_q_closes_conflict() {
         let q = key(KeyCode::Char('q'));
-        assert!(matches!(resolve(InputContext::ConflictNav, q), Some(Message::CloseConflict)));
+        assert!(matches!(
+            resolve(InputContext::ConflictNav, q),
+            Some(Message::CloseConflict)
+        ));
     }
 
     #[test]
     fn test_filelist_arrow_down_moves_down() {
-        assert!(matches!(resolve(InputContext::FileList, key(KeyCode::Down)), Some(Message::MoveDown)));
+        assert!(matches!(
+            resolve(InputContext::FileList, key(KeyCode::Down)),
+            Some(Message::MoveDown)
+        ));
     }
 
     #[test]
     fn test_filelist_arrow_up_moves_up() {
-        assert!(matches!(resolve(InputContext::FileList, key(KeyCode::Up)), Some(Message::MoveUp)));
+        assert!(matches!(
+            resolve(InputContext::FileList, key(KeyCode::Up)),
+            Some(Message::MoveUp)
+        ));
     }
 
     #[test]
@@ -119,71 +146,110 @@ mod tests {
 
     #[test]
     fn test_space_opens_which_key() {
-        assert!(matches!(resolve(InputContext::FileList, key(KeyCode::Char(' '))), Some(Message::OpenWhichKey)));
-        assert!(matches!(resolve(InputContext::DiffHunkNav, key(KeyCode::Char(' '))), Some(Message::OpenWhichKey)));
+        assert!(matches!(
+            resolve(InputContext::FileList, key(KeyCode::Char(' '))),
+            Some(Message::OpenWhichKey)
+        ));
+        assert!(matches!(
+            resolve(InputContext::DiffHunkNav, key(KeyCode::Char(' '))),
+            Some(Message::OpenWhichKey)
+        ));
     }
 
     // ── Diff arrow keys: plain=hunk, shift=scroll ──
 
     #[test]
     fn test_diff_hunk_arrow_down_next_hunk() {
-        assert!(matches!(resolve(InputContext::DiffHunkNav, key(KeyCode::Down)), Some(Message::NextHunk)));
+        assert!(matches!(
+            resolve(InputContext::DiffHunkNav, key(KeyCode::Down)),
+            Some(Message::NextHunk)
+        ));
     }
 
     #[test]
     fn test_diff_hunk_arrow_up_prev_hunk() {
-        assert!(matches!(resolve(InputContext::DiffHunkNav, key(KeyCode::Up)), Some(Message::PrevHunk)));
+        assert!(matches!(
+            resolve(InputContext::DiffHunkNav, key(KeyCode::Up)),
+            Some(Message::PrevHunk)
+        ));
     }
 
     #[test]
     fn test_diff_hunk_shift_down_scrolls() {
         let shift_down = key_mod(KeyCode::Down, KeyModifiers::SHIFT);
-        assert!(matches!(resolve(InputContext::DiffHunkNav, shift_down), Some(Message::MoveDown)));
+        assert!(matches!(
+            resolve(InputContext::DiffHunkNav, shift_down),
+            Some(Message::MoveDown)
+        ));
     }
 
     #[test]
     fn test_diff_hunk_shift_up_scrolls() {
         let shift_up = key_mod(KeyCode::Up, KeyModifiers::SHIFT);
-        assert!(matches!(resolve(InputContext::DiffHunkNav, shift_up), Some(Message::MoveUp)));
+        assert!(matches!(
+            resolve(InputContext::DiffHunkNav, shift_up),
+            Some(Message::MoveUp)
+        ));
     }
 
     #[test]
     fn test_diff_line_arrow_down_moves_down() {
-        assert!(matches!(resolve(InputContext::DiffLineNav, key(KeyCode::Down)), Some(Message::MoveDown)));
+        assert!(matches!(
+            resolve(InputContext::DiffLineNav, key(KeyCode::Down)),
+            Some(Message::MoveDown)
+        ));
     }
 
     #[test]
     fn test_diff_line_arrow_up_moves_up() {
-        assert!(matches!(resolve(InputContext::DiffLineNav, key(KeyCode::Up)), Some(Message::MoveUp)));
+        assert!(matches!(
+            resolve(InputContext::DiffLineNav, key(KeyCode::Up)),
+            Some(Message::MoveUp)
+        ));
     }
 
     #[test]
     fn test_diff_line_shift_down_next_hunk() {
         let shift_down = key_mod(KeyCode::Down, KeyModifiers::SHIFT);
-        assert!(matches!(resolve(InputContext::DiffLineNav, shift_down), Some(Message::NextHunk)));
+        assert!(matches!(
+            resolve(InputContext::DiffLineNav, shift_down),
+            Some(Message::NextHunk)
+        ));
     }
 
     #[test]
     fn test_diff_line_shift_up_prev_hunk() {
         let shift_up = key_mod(KeyCode::Up, KeyModifiers::SHIFT);
-        assert!(matches!(resolve(InputContext::DiffLineNav, shift_up), Some(Message::PrevHunk)));
+        assert!(matches!(
+            resolve(InputContext::DiffLineNav, shift_up),
+            Some(Message::PrevHunk)
+        ));
     }
 
     // ── FileList context ──
 
     #[test]
     fn test_filelist_enter_switches_panel() {
-        assert!(matches!(resolve(InputContext::FileList, key(KeyCode::Enter)), Some(Message::SwitchPanel)));
+        assert!(matches!(
+            resolve(InputContext::FileList, key(KeyCode::Enter)),
+            Some(Message::SwitchPanel)
+        ));
     }
 
     #[test]
     fn test_filelist_right_switches_panel() {
-        assert!(matches!(resolve(InputContext::FileList, key(KeyCode::Right)), Some(Message::SwitchPanel)));
+        assert!(matches!(
+            resolve(InputContext::FileList, key(KeyCode::Right)),
+            Some(Message::SwitchPanel)
+        ));
     }
 
     #[test]
     fn test_filelist_slash_starts_filter() {
-        assert!(matches!(resolve(InputContext::FileList, key(KeyCode::Char('/'))), Some(Message::StartFilter)));
+        assert!(matches!(
+            resolve(InputContext::FileList, key(KeyCode::Char('/'))),
+            Some(Message::StartFilter)
+        ));
     }
 
     #[test]
@@ -195,55 +261,85 @@ mod tests {
 
     #[test]
     fn test_hunknav_left_switches_panel() {
-        assert!(matches!(resolve(InputContext::DiffHunkNav, key(KeyCode::Left)), Some(Message::SwitchPanel)));
+        assert!(matches!(
+            resolve(InputContext::DiffHunkNav, key(KeyCode::Left)),
+            Some(Message::SwitchPanel)
+        ));
     }
 
     #[test]
     fn test_hunknav_enter_enters_line_mode() {
-        assert!(matches!(resolve(InputContext::DiffHunkNav, key(KeyCode::Enter)), Some(Message::EnterLineMode)));
+        assert!(matches!(
+            resolve(InputContext::DiffHunkNav, key(KeyCode::Enter)),
+            Some(Message::EnterLineMode)
+        ));
     }
 
     #[test]
     fn test_hunknav_right_enters_line_mode() {
-        assert!(matches!(resolve(InputContext::DiffHunkNav, key(KeyCode::Right)), Some(Message::EnterLineMode)));
+        assert!(matches!(
+            resolve(InputContext::DiffHunkNav, key(KeyCode::Right)),
+            Some(Message::EnterLineMode)
+        ));
     }
 
     // ── DiffLineNav context ──
 
     #[test]
     fn test_linenav_enter_toggles_line() {
-        assert!(matches!(resolve(InputContext::DiffLineNav, key(KeyCode::Enter)), Some(Message::ToggleLine)));
+        assert!(matches!(
+            resolve(InputContext::DiffLineNav, key(KeyCode::Enter)),
+            Some(Message::ToggleLine)
+        ));
     }
 
     #[test]
     fn test_linenav_right_toggles_line() {
-        assert!(matches!(resolve(InputContext::DiffLineNav, key(KeyCode::Right)), Some(Message::ToggleLine)));
+        assert!(matches!(
+            resolve(InputContext::DiffLineNav, key(KeyCode::Right)),
+            Some(Message::ToggleLine)
+        ));
     }
 
     #[test]
     fn test_linenav_esc_exits_line_mode() {
-        assert!(matches!(resolve(InputContext::DiffLineNav, key(KeyCode::Esc)), Some(Message::ExitLineMode)));
+        assert!(matches!(
+            resolve(InputContext::DiffLineNav, key(KeyCode::Esc)),
+            Some(Message::ExitLineMode)
+        ));
     }
 
     #[test]
     fn test_linenav_left_exits_line_mode() {
-        assert!(matches!(resolve(InputContext::DiffLineNav, key(KeyCode::Left)), Some(Message::ExitLineMode)));
+        assert!(matches!(
+            resolve(InputContext::DiffLineNav, key(KeyCode::Left)),
+            Some(Message::ExitLineMode)
+        ));
     }
 
     // ── ConflictNav context ──
 
     #[test]
     fn test_conflictnav_left_closes() {
-        assert!(matches!(resolve(InputContext::ConflictNav, key(KeyCode::Left)), Some(Message::CloseConflict)));
+        assert!(matches!(
+            resolve(InputContext::ConflictNav, key(KeyCode::Left)),
+            Some(Message::CloseConflict)
+        ));
     }
 
     #[test]
     fn test_conflictnav_esc_closes() {
-        assert!(matches!(resolve(InputContext::ConflictNav, key(KeyCode::Esc)), Some(Message::CloseConflict)));
+        assert!(matches!(
+            resolve(InputContext::ConflictNav, key(KeyCode::Esc)),
+            Some(Message::CloseConflict)
+        ));
     }
 
     #[test]
     fn test_conflictnav_space_opens_which_key() {
-        assert!(matches!(resolve(InputContext::ConflictNav, key(KeyCode::Char(' '))), Some(Message::OpenWhichKey)));
+        assert!(matches!(
+            resolve(InputContext::ConflictNav, key(KeyCode::Char(' '))),
+            Some(Message::OpenWhichKey)
+        ));
     }
 }

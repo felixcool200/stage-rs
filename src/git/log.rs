@@ -15,7 +15,8 @@ pub struct LogEntry {
 
 pub fn get_log(repo: &Repository, max_count: usize) -> Result<Vec<LogEntry>> {
     // Build a map of commit OID -> ref names (branches and tags)
-    let mut ref_map: std::collections::HashMap<git2::Oid, Vec<String>> = std::collections::HashMap::new();
+    let mut ref_map: std::collections::HashMap<git2::Oid, Vec<String>> =
+        std::collections::HashMap::new();
     if let Ok(refs) = repo.references() {
         for reference in refs.flatten() {
             let name = if let Some(shorthand) = reference.shorthand() {
@@ -43,16 +44,9 @@ pub fn get_log(repo: &Repository, max_count: usize) -> Result<Vec<LogEntry>> {
 
         entries.push(LogEntry {
             hash: oid.to_string()[..7].to_string(),
-            author: commit
-                .author()
-                .name()
-                .unwrap_or("unknown")
-                .to_string(),
+            author: commit.author().name().unwrap_or("unknown").to_string(),
             date,
-            message: commit
-                .summary()
-                .unwrap_or("")
-                .to_string(),
+            message: commit.summary().unwrap_or("").to_string(),
             refs: ref_map.remove(&oid).unwrap_or_default(),
         });
     }
@@ -70,10 +64,7 @@ pub struct CommitDiffResult {
 }
 
 /// Get the diff for a specific commit as side-by-side DiffLine vectors.
-pub fn get_commit_diff_sides(
-    repo: &Repository,
-    hash: &str,
-) -> Result<CommitDiffResult> {
+pub fn get_commit_diff_sides(repo: &Repository, hash: &str) -> Result<CommitDiffResult> {
     let obj = repo
         .revparse_single(hash)
         .map_err(|e| color_eyre::eyre::eyre!("Cannot find commit: {e}"))?;
@@ -179,7 +170,8 @@ pub fn get_blame(repo: &Repository, path: &str) -> Result<Vec<BlameLine>> {
         let hunk = spec.get_index(i).unwrap();
         let oid = hunk.final_commit_id();
         let hash = oid.to_string()[..7].to_string();
-        let author = repo.find_commit(oid)
+        let author = repo
+            .find_commit(oid)
             .ok()
             .and_then(|c| c.author().name().map(String::from))
             .unwrap_or_default();

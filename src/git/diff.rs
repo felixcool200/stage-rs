@@ -73,10 +73,7 @@ fn get_head_content(repo: &Repository, path: &str) -> Result<String> {
 }
 
 /// Compute side-by-side diff lines and hunks.
-pub fn compute_diff(
-    old: &str,
-    new: &str,
-) -> (Vec<DiffLine>, Vec<DiffLine>, Vec<Hunk>) {
+pub fn compute_diff(old: &str, new: &str) -> (Vec<DiffLine>, Vec<DiffLine>, Vec<Hunk>) {
     let diff = TextDiff::from_lines(old, new);
     let mut left_lines = Vec::new();
     let mut right_lines = Vec::new();
@@ -226,9 +223,12 @@ pub fn apply_lines(old: &str, new: &str, selected_rows: &BTreeSet<usize>) -> Str
 /// Get all display rows that are changed lines within a hunk.
 pub fn changed_rows_in_hunk(hunk: &Hunk, left_lines: &[DiffLine]) -> Vec<usize> {
     (hunk.display_start..hunk.display_end)
-        .filter(|&i| left_lines[i].hunk_index.is_some() && left_lines[i].kind != DiffLineKind::Spacer
-            || (i < left_lines.len() && left_lines[i].kind == DiffLineKind::Spacer
-                && left_lines[i].hunk_index.is_some()))
+        .filter(|&i| {
+            left_lines[i].hunk_index.is_some() && left_lines[i].kind != DiffLineKind::Spacer
+                || (i < left_lines.len()
+                    && left_lines[i].kind == DiffLineKind::Spacer
+                    && left_lines[i].hunk_index.is_some())
+        })
         .collect()
 }
 

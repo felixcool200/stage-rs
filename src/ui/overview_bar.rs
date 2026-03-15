@@ -30,7 +30,11 @@ pub fn render(
 
         let mut has_added = false;
         let mut has_removed = false;
-        for dl in lines.iter().take(file_end.min(lines.len())).skip(file_start) {
+        for dl in lines
+            .iter()
+            .take(file_end.min(lines.len()))
+            .skip(file_start)
+        {
             match dl.kind {
                 DiffLineKind::Added => has_added = true,
                 DiffLineKind::Removed | DiffLineKind::Spacer => {
@@ -62,7 +66,10 @@ pub fn render(
             theme.bg
         };
 
-        bar_lines.push(Line::from(Span::styled(ch, Style::default().fg(color).bg(bg))));
+        bar_lines.push(Line::from(Span::styled(
+            ch,
+            Style::default().fg(color).bg(bg),
+        )));
     }
 
     frame.render_widget(Paragraph::new(bar_lines), area);

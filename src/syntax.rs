@@ -1,8 +1,8 @@
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
-use syntect::highlighting::{ThemeSet, Style as SynStyle};
-use syntect::parsing::SyntaxSet;
 use syntect::easy::HighlightLines;
+use syntect::highlighting::{Style as SynStyle, ThemeSet};
+use syntect::parsing::SyntaxSet;
 
 pub struct Highlighter {
     syntax_set: SyntaxSet,

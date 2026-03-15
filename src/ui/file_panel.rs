@@ -30,11 +30,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     // Reserve a line at the bottom for filter input when filtering
     let (list_area, filter_area) = if filtering {
         let inner = block.inner(area);
-        let [la, fa] = Layout::vertical([
-            Constraint::Fill(1),
-            Constraint::Length(1),
-        ])
-        .areas(inner);
+        let [la, fa] = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(inner);
         (la, Some(fa))
     } else {
         (block.inner(area), None)
@@ -43,7 +39,8 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_widget(block, area);
 
     let filtered = app.filtered_entries();
-    let filtered_indices: std::collections::HashSet<usize> = filtered.iter().map(|(i, _)| *i).collect();
+    let filtered_indices: std::collections::HashSet<usize> =
+        filtered.iter().map(|(i, _)| *i).collect();
 
     let mut items: Vec<ListItem> = Vec::new();
     // None = header or section label (not a file), Some(i) = file entry index
@@ -73,9 +70,15 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         if current_section != Some(section) {
             current_section = Some(section);
             let count = if filtering {
-                filtered.iter().filter(|(_, e)| e.status.section_name() == section).count()
+                filtered
+                    .iter()
+                    .filter(|(_, e)| e.status.section_name() == section)
+                    .count()
             } else {
-                app.file_entries.iter().filter(|e| e.status.section_name() == section).count()
+                app.file_entries
+                    .iter()
+                    .filter(|e| e.status.section_name() == section)
+                    .count()
             };
             items.push(ListItem::new(Line::from(vec![Span::styled(
                 format!(" {section} ({count})"),
@@ -94,11 +97,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         };
 
         let label = entry.status.short_label();
-        let filename = entry
-            .path
-            .rsplit('/')
-            .next()
-            .unwrap_or(&entry.path);
+        let filename = entry.path.rsplit('/').next().unwrap_or(&entry.path);
         let dir = if entry.path.contains('/') {
             let parent = &entry.path[..entry.path.len() - filename.len()];
             format!(" {parent}")
@@ -114,7 +113,10 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
         let mut second_spans: Vec<Span> = Vec::new();
         if !dir.is_empty() {
-            second_spans.push(Span::styled(format!("    {}", dir.trim()), Style::default().fg(app.theme.fg_dim)));
+            second_spans.push(Span::styled(
+                format!("    {}", dir.trim()),
+                Style::default().fg(app.theme.fg_dim),
+            ));
         }
         if entry.insertions > 0 || entry.deletions > 0 {
             if !second_spans.is_empty() {
@@ -156,12 +158,11 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             .position(|e| *e == Some(app.selected_index))
     };
 
-    let list = List::new(items)
-        .highlight_style(
-            Style::default()
-                .bg(app.theme.fg_dim)
-                .add_modifier(Modifier::BOLD),
-        );
+    let list = List::new(items).highlight_style(
+        Style::default()
+            .bg(app.theme.fg_dim)
+            .add_modifier(Modifier::BOLD),
+    );
 
     let mut state = ListState::default();
     state.select(display_index);
@@ -172,7 +173,12 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         let line = Line::from(vec![
             Span::styled("/", Style::default().fg(app.theme.cyan)),
             Span::styled(filter_text.as_str(), Style::default().fg(app.theme.fg)),
-            Span::styled("_", Style::default().fg(app.theme.fg).add_modifier(Modifier::SLOW_BLINK)),
+            Span::styled(
+                "_",
+                Style::default()
+                    .fg(app.theme.fg)
+                    .add_modifier(Modifier::SLOW_BLINK),
+            ),
         ]);
         frame.render_widget(Paragraph::new(line), fa);
     }

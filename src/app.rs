@@ -1496,6 +1496,8 @@ impl App {
                         } else {
                             unreachable!()
                         };
+                        let initial_scroll =
+                            result.hunks.first().map(|h| h.display_start).unwrap_or(0);
                         self.overlay = Overlay::CommitDetail {
                             hash,
                             message,
@@ -1504,7 +1506,7 @@ impl App {
                             hunks: result.hunks,
                             current_hunk: 0,
                             file_extensions: result.file_extensions,
-                            scroll: 0,
+                            scroll: initial_scroll,
                             viewport_height: 0,
                             log_entries,
                             log_selected: selected,
@@ -1547,6 +1549,8 @@ impl App {
                     } else {
                         unreachable!()
                     };
+                    let initial_scroll =
+                        result.hunks.first().map(|h| h.display_start).unwrap_or(0);
                     self.overlay = Overlay::CommitDetail {
                         hash,
                         message,
@@ -1555,7 +1559,7 @@ impl App {
                         hunks: result.hunks,
                         current_hunk: 0,
                         file_extensions: result.file_extensions,
-                        scroll: 0,
+                        scroll: initial_scroll,
                         viewport_height: 0,
                         log_entries,
                         log_selected: new_idx,

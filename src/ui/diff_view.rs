@@ -170,70 +170,7 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, main_area);
 
-    render_change_overview(frame, ds, bar_area, theme);
-}
-
-/// Render a 1-column-wide change overview bar showing where modifications are in the file.
-/// Green = added, Red = removed, DarkGray = equal, Cyan = viewport indicator.
-fn render_change_overview(frame: &mut Frame, ds: &DiffState, area: Rect, theme: &Theme) {
-    let bar_height = area.height as usize;
-    if bar_height == 0 {
-        return;
-    }
-
-    let total_lines = ds.right_lines.len().max(1);
-    let visible_height = bar_height; // each row of the bar maps to a portion of the file
-
-    // Build the bar: map each bar row to a file region
-    let mut bar_lines: Vec<Line> = Vec::with_capacity(bar_height);
-    for row in 0..bar_height {
-        let file_start = row * total_lines / bar_height;
-        let file_end = ((row + 1) * total_lines / bar_height).max(file_start + 1);
-
-        // Check what kinds of lines are in this region
-        let mut has_added = false;
-        let mut has_removed = false;
-        for i in file_start..file_end.min(ds.right_lines.len()) {
-            match ds.right_lines[i].kind {
-                DiffLineKind::Added => has_added = true,
-                DiffLineKind::Removed | DiffLineKind::Spacer => {
-                    if ds.right_lines[i].hunk_index.is_some() {
-                        has_removed = true;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Determine if this row overlaps the current viewport
-        let viewport_start = ds.scroll;
-        let viewport_end = ds.scroll + visible_height;
-        let in_viewport = file_start < viewport_end && file_end > viewport_start;
-
-        let (ch, color) = if has_added && has_removed {
-            ("┃", theme.yellow)
-        } else if has_added {
-            ("┃", theme.green)
-        } else if has_removed {
-            ("┃", theme.red)
-        } else if in_viewport {
-            ("│", theme.fg_dim)
-        } else {
-            (" ", theme.fg_dim)
-        };
-
-        // Brighten viewport indicator
-        let bg = if in_viewport {
-            theme.diff_viewport_bg
-        } else {
-            theme.bg
-        };
-
-        bar_lines.push(Line::from(Span::styled(ch, Style::default().fg(color).bg(bg))));
-    }
-
-    let paragraph = Paragraph::new(bar_lines);
-    frame.render_widget(paragraph, area);
+    super::overview_bar::render(frame, &ds.right_lines, ds.scroll, bar_area.height as usize, bar_area, theme);
 }
 
 #[derive(PartialEq, Eq)]

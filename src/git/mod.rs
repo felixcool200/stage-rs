@@ -8,7 +8,7 @@ use git2::Repository;
 use std::path::Path;
 
 pub use diff::{apply_hunk, apply_lines, changed_rows_in_hunk, compute_diff, DiffLine, DiffLineKind, Hunk};
-pub use log::{BlameLine, LogEntry};
+pub use log::{BlameLine, CommitDiffResult, LogEntry};
 pub use operations::{BranchEntry, StashEntry};
 pub use status::{FileEntry, FileStatus};
 
@@ -78,8 +78,8 @@ impl GitRepo {
         log::get_log(&self.repo, max_count)
     }
 
-    pub fn get_commit_diff(&self, hash: &str) -> Result<String> {
-        log::get_commit_diff(&self.repo, hash)
+    pub fn get_commit_diff_sides(&self, hash: &str) -> Result<CommitDiffResult> {
+        log::get_commit_diff_sides(&self.repo, hash)
     }
 
     pub fn get_blame(&self, path: &str) -> Result<Vec<BlameLine>> {

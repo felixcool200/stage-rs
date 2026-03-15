@@ -1,5 +1,6 @@
 mod diff_view;
 mod file_panel;
+mod overview_bar;
 mod popup;
 mod status_bar;
 

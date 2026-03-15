@@ -66,10 +66,14 @@ fn main() -> Result<()> {
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     loop {
         // Update viewport height for scroll centering
+        let term_height = terminal.size()?.height as usize;
         if let Some(ds) = &mut app.diff_state {
-            let term_height = terminal.size()?.height as usize;
             // body height = term_height - header(1) - footer(1), each diff panel has 2 border rows
             ds.viewport_height = term_height.saturating_sub(4);
+        }
+        if let Overlay::CommitDetail { ref mut viewport_height, .. } = app.overlay {
+            // popup is 80% of terminal height, minus 2 border rows
+            *viewport_height = (term_height * 80 / 100).saturating_sub(2);
         }
         terminal.draw(|frame| ui::render(app, frame))?;
 

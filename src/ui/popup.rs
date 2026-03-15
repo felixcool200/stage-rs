@@ -36,9 +36,8 @@ pub fn render(app: &App, frame: &mut Frame) {
         Overlay::BranchList { entries, selected, creating } => {
             render_branch_list(frame, entries, *selected, creating.as_deref(), theme);
         }
-        Overlay::CommitDetail { hash, message, diff_lines, scroll, log_entries, log_selected } => {
-            let refs = &log_entries[*log_selected].refs;
-            render_commit_detail(frame, hash, message, diff_lines, *scroll, *log_selected, log_entries.len(), refs, theme);
+        Overlay::CommitDetail { .. } => {
+            render_commit_detail(app, frame);
         }
         Overlay::Rebase { entries, selected, .. } => {
             render_rebase(frame, entries, *selected, theme);
@@ -341,17 +340,20 @@ fn render_branch_list(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_commit_detail(
-    frame: &mut Frame,
-    hash: &str,
-    message: &str,
-    diff_lines: &[String],
-    scroll: usize,
-    log_index: usize,
-    log_total: usize,
-    refs: &[String],
-    theme: &Theme,
-) {
+fn render_commit_detail(app: &App, frame: &mut Frame) {
+    let theme = &app.theme;
+    let Overlay::CommitDetail {
+        hash, message, left_lines, right_lines, hunks, current_hunk,
+        file_extensions, scroll, log_entries, log_selected, ..
+    } = &app.overlay else {
+        return;
+    };
+
+    let refs = &log_entries[*log_selected].refs;
+    let scroll = *scroll;
+    let log_total = log_entries.len();
+    let log_index = *log_selected;
+
     let area = centered_rect(85, 80, frame.area());
     frame.render_widget(Clear, area);
 
@@ -361,15 +363,23 @@ fn render_commit_detail(
         format!(" ({})", refs.join(", "))
     };
 
+    let hunk_info = if hunks.is_empty() {
+        String::new()
+    } else {
+        format!(" hunk {}/{}", current_hunk + 1, hunks.len())
+    };
+
     let block = Block::default()
         .title(format!(" [{}/{}] {hash}{refs_str} - {message} ", log_index + 1, log_total))
         .title_bottom(Line::from(vec![
-            Span::styled(" Shift+↑/↓", Style::default().fg(theme.yellow)),
-            Span::styled(":prev/next  ", Style::default().fg(theme.fg_dim)),
+            Span::styled(" Ctrl+↑/↓", Style::default().fg(theme.yellow)),
+            Span::styled(":prev/next commit  ", Style::default().fg(theme.fg_dim)),
             Span::styled("↑/↓", Style::default().fg(theme.yellow)),
+            Span::styled(":hunk  ", Style::default().fg(theme.fg_dim)),
+            Span::styled("Shift+↑/↓", Style::default().fg(theme.yellow)),
             Span::styled(":scroll  ", Style::default().fg(theme.fg_dim)),
             Span::styled("q/Esc", Style::default().fg(theme.yellow)),
-            Span::styled(":close ", Style::default().fg(theme.fg_dim)),
+            Span::styled(format!(":close{hunk_info} "), Style::default().fg(theme.fg_dim)),
         ]))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.yellow))
@@ -378,28 +388,83 @@ fn render_commit_detail(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Split: left half | right half | 1-col overview bar
+    let [left_area, right_area, bar_area] = Layout::horizontal([
+        Constraint::Fill(1),
+        Constraint::Fill(1),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+
     let visible_height = inner.height as usize;
-    let lines: Vec<Line> = diff_lines
+
+    // Render left side (old)
+    let left: Vec<Line> = left_lines
         .iter()
+        .enumerate()
         .skip(scroll)
         .take(visible_height)
-        .map(|line| {
-            let color = if line.starts_with('+') {
-                theme.green
-            } else if line.starts_with('-') {
-                theme.red
-            } else if line.starts_with("@@") {
-                theme.cyan
+        .map(|(i, dl)| {
+            let (fg, bg) = commit_line_style(dl, theme);
+            let mut spans = Vec::new();
+            if let Some(highlighted) = try_highlight(app, dl, i, file_extensions, bg) {
+                spans.extend(highlighted);
             } else {
-                theme.fg
-            };
-            Line::from(Span::styled(line.as_str(), Style::default().fg(color)))
+                spans.push(Span::styled(&dl.content, Style::default().fg(fg).bg(bg)));
+            }
+            Line::from(spans)
         })
         .collect();
+    frame.render_widget(Paragraph::new(left), left_area);
 
-    let paragraph = Paragraph::new(lines);
-    frame.render_widget(paragraph, inner);
+    // Render right side (new)
+    let right: Vec<Line> = right_lines
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(visible_height)
+        .map(|(i, dl)| {
+            let (fg, bg) = commit_line_style(dl, theme);
+            let mut spans = Vec::new();
+            if let Some(highlighted) = try_highlight(app, dl, i, file_extensions, bg) {
+                spans.extend(highlighted);
+            } else {
+                spans.push(Span::styled(&dl.content, Style::default().fg(fg).bg(bg)));
+            }
+            Line::from(spans)
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(right), right_area);
+
+    // Render change overview bar
+    super::overview_bar::render(frame, right_lines, scroll, visible_height, bar_area, theme);
 }
+
+fn try_highlight<'a>(
+    app: &App,
+    dl: &'a crate::git::DiffLine,
+    line_idx: usize,
+    file_extensions: &[Option<String>],
+    bg: ratatui::style::Color,
+) -> Option<Vec<Span<'a>>> {
+    use crate::git::DiffLineKind;
+    if dl.kind == DiffLineKind::Spacer || dl.content.is_empty() {
+        return None;
+    }
+    let ext = file_extensions.get(line_idx)?.as_deref()?;
+    app.highlighter.highlight_line(&dl.content, ext, bg)
+}
+
+fn commit_line_style(dl: &crate::git::DiffLine, theme: &Theme) -> (ratatui::style::Color, ratatui::style::Color) {
+    use crate::git::DiffLineKind;
+    match dl.kind {
+        DiffLineKind::Equal => (theme.fg, theme.bg),
+        DiffLineKind::Removed => (theme.red, theme.diff_removed_bg),
+        DiffLineKind::Added => (theme.green, theme.diff_added_bg),
+        DiffLineKind::Spacer => (theme.fg_dim, theme.bg),
+    }
+}
+
 
 fn render_rebase(
     frame: &mut Frame,

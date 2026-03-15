@@ -1,5 +1,8 @@
+use super::diff::{compute_diff, DiffLine, DiffLineKind, Hunk};
+use crate::syntax;
 use color_eyre::Result;
 use git2::Repository;
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct LogEntry {
@@ -57,30 +60,110 @@ pub fn get_log(repo: &Repository, max_count: usize) -> Result<Vec<LogEntry>> {
     Ok(entries)
 }
 
-/// Get the diff for a specific commit as a string.
-pub fn get_commit_diff(repo: &Repository, hash: &str) -> Result<String> {
-    let obj = repo.revparse_single(hash)
+/// Result of computing a commit's side-by-side diff.
+pub struct CommitDiffResult {
+    pub left_lines: Vec<DiffLine>,
+    pub right_lines: Vec<DiffLine>,
+    pub hunks: Vec<Hunk>,
+    /// File extension for each display line (for syntax highlighting).
+    pub file_extensions: Vec<Option<String>>,
+}
+
+/// Get the diff for a specific commit as side-by-side DiffLine vectors.
+pub fn get_commit_diff_sides(
+    repo: &Repository,
+    hash: &str,
+) -> Result<CommitDiffResult> {
+    let obj = repo
+        .revparse_single(hash)
         .map_err(|e| color_eyre::eyre::eyre!("Cannot find commit: {e}"))?;
-    let commit = obj.peel_to_commit()
+    let commit = obj
+        .peel_to_commit()
         .map_err(|e| color_eyre::eyre::eyre!("Not a commit: {e}"))?;
     let tree = commit.tree()?;
     let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
     let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
 
-    let mut output = String::new();
-    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
-        let prefix = match line.origin() {
-            '+' => "+",
-            '-' => "-",
-            'H' => "@@",
-            'F' => "--- ",
-            _ => " ",
+    let mut left_lines = Vec::new();
+    let mut right_lines = Vec::new();
+    let mut all_hunks = Vec::new();
+    let mut file_extensions = Vec::new();
+    let num_deltas = diff.deltas().len();
+
+    for (di, delta) in diff.deltas().enumerate() {
+        let path = delta
+            .new_file()
+            .path()
+            .or_else(|| delta.old_file().path())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string());
+
+        let ext = syntax::file_extension(&path).map(String::from);
+
+        // File header line
+        let header = DiffLine {
+            content: format!("── {} ──", path),
+            kind: DiffLineKind::Equal,
+            hunk_index: None,
         };
-        output.push_str(prefix);
-        output.push_str(&String::from_utf8_lossy(line.content()));
-        true
-    })?;
-    Ok(output)
+        left_lines.push(header.clone());
+        right_lines.push(header);
+        file_extensions.push(None); // no highlighting for header
+
+        // Get old content from parent tree
+        let old_content = parent_tree
+            .as_ref()
+            .and_then(|pt| pt.get_path(Path::new(&path)).ok())
+            .and_then(|entry| repo.find_blob(entry.id()).ok())
+            .map(|blob| String::from_utf8_lossy(blob.content()).to_string())
+            .unwrap_or_default();
+
+        // Get new content from commit tree
+        let new_content = tree
+            .get_path(Path::new(&path))
+            .ok()
+            .and_then(|entry| repo.find_blob(entry.id()).ok())
+            .map(|blob| String::from_utf8_lossy(blob.content()).to_string())
+            .unwrap_or_default();
+
+        let file_offset = left_lines.len();
+        let (file_left, file_right, file_hunks) = compute_diff(&old_content, &new_content);
+
+        // Offset hunks to global line indices
+        for h in file_hunks {
+            all_hunks.push(Hunk {
+                display_start: h.display_start + file_offset,
+                display_end: h.display_end + file_offset,
+            });
+        }
+
+        // File extension for each line in this file
+        for _ in 0..file_left.len() {
+            file_extensions.push(ext.clone());
+        }
+
+        left_lines.extend(file_left);
+        right_lines.extend(file_right);
+
+        // Blank separator between files
+        if di + 1 < num_deltas {
+            let sep = DiffLine {
+                content: String::new(),
+                kind: DiffLineKind::Equal,
+                hunk_index: None,
+            };
+            left_lines.push(sep.clone());
+            right_lines.push(sep);
+            file_extensions.push(None);
+        }
+    }
+
+    Ok(CommitDiffResult {
+        left_lines,
+        right_lines,
+        hunks: all_hunks,
+        file_extensions,
+    })
 }
 
 #[derive(Debug, Clone)]

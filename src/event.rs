@@ -151,10 +151,12 @@ fn handle_dirty_checkout(code: KeyCode, has_conflicts: bool) -> Option<Message> 
 fn handle_commit_detail(code: KeyCode, modifiers: KeyModifiers) -> Option<Message> {
     match (modifiers, code) {
         (_, KeyCode::Esc) | (_, KeyCode::Char('q')) => Some(Message::CloseOverlay),
-        (KeyModifiers::SHIFT, KeyCode::Down) => Some(Message::NextCommitDetail),
-        (KeyModifiers::SHIFT, KeyCode::Up) => Some(Message::PrevCommitDetail),
-        (_, KeyCode::Down) => Some(Message::MoveDown),
-        (_, KeyCode::Up) => Some(Message::MoveUp),
+        (KeyModifiers::CONTROL, KeyCode::Down) => Some(Message::NextCommitDetail),
+        (KeyModifiers::CONTROL, KeyCode::Up) => Some(Message::PrevCommitDetail),
+        (KeyModifiers::SHIFT, KeyCode::Down) => Some(Message::MoveDown),
+        (KeyModifiers::SHIFT, KeyCode::Up) => Some(Message::MoveUp),
+        (_, KeyCode::Down) => Some(Message::NextHunkCommitDetail),
+        (_, KeyCode::Up) => Some(Message::PrevHunkCommitDetail),
         _ => None,
     }
 }

@@ -144,8 +144,13 @@ pub enum Overlay {
     CommitDetail {
         hash: String,
         message: String,
-        diff_lines: Vec<String>,
+        left_lines: Vec<crate::git::DiffLine>,
+        right_lines: Vec<crate::git::DiffLine>,
+        hunks: Vec<crate::git::Hunk>,
+        current_hunk: usize,
+        file_extensions: Vec<Option<String>>,
         scroll: usize,
+        viewport_height: usize,
         log_entries: Vec<LogEntry>,
         log_selected: usize,
     },
@@ -404,6 +409,8 @@ pub enum Message {
     ViewCommitDetail,
     PrevCommitDetail,
     NextCommitDetail,
+    PrevHunkCommitDetail,
+    NextHunkCommitDetail,
     // Interactive rebase
     StartRebase,
     RebaseCycleAction,
@@ -1342,9 +1349,8 @@ impl App {
                     if let Some(entry) = entries.get(selected) {
                         let hash = entry.hash.clone();
                         let message = entry.message.clone();
-                        match self.repo.get_commit_diff(&hash) {
-                            Ok(diff_text) => {
-                                let diff_lines: Vec<String> = diff_text.lines().map(String::from).collect();
+                        match self.repo.get_commit_diff_sides(&hash) {
+                            Ok(result) => {
                                 // Take log entries out of GitLog overlay
                                 let log_entries = if let Overlay::GitLog { entries, .. } = std::mem::replace(&mut self.overlay, Overlay::None) {
                                     entries
@@ -1354,8 +1360,13 @@ impl App {
                                 self.overlay = Overlay::CommitDetail {
                                     hash,
                                     message,
-                                    diff_lines,
+                                    left_lines: result.left_lines,
+                                    right_lines: result.right_lines,
+                                    hunks: result.hunks,
+                                    current_hunk: 0,
+                                    file_extensions: result.file_extensions,
                                     scroll: 0,
+                                    viewport_height: 0,
                                     log_entries,
                                     log_selected: selected,
                                 };
@@ -1378,9 +1389,8 @@ impl App {
                     };
                     let hash = log_entries[new_idx].hash.clone();
                     let message = log_entries[new_idx].message.clone();
-                    match self.repo.get_commit_diff(&hash) {
-                        Ok(diff_text) => {
-                            let diff_lines: Vec<String> = diff_text.lines().map(String::from).collect();
+                    match self.repo.get_commit_diff_sides(&hash) {
+                        Ok(result) => {
                             let log_entries = if let Overlay::CommitDetail { log_entries, .. } = std::mem::replace(&mut self.overlay, Overlay::None) {
                                 log_entries
                             } else {
@@ -1389,8 +1399,13 @@ impl App {
                             self.overlay = Overlay::CommitDetail {
                                 hash,
                                 message,
-                                diff_lines,
+                                left_lines: result.left_lines,
+                                right_lines: result.right_lines,
+                                hunks: result.hunks,
+                                current_hunk: 0,
+                                file_extensions: result.file_extensions,
                                 scroll: 0,
+                                viewport_height: 0,
                                 log_entries,
                                 log_selected: new_idx,
                             };
@@ -1398,6 +1413,24 @@ impl App {
                         Err(e) => {
                             self.status_message = Some(format!("Diff failed: {e}"));
                         }
+                    }
+                }
+            }
+            Message::PrevHunkCommitDetail => {
+                if let Overlay::CommitDetail { ref hunks, ref mut current_hunk, ref mut scroll, viewport_height, .. } = self.overlay {
+                    if !hunks.is_empty() && *current_hunk > 0 {
+                        *current_hunk -= 1;
+                        let offset = viewport_height / 3;
+                        *scroll = hunks[*current_hunk].display_start.saturating_sub(offset);
+                    }
+                }
+            }
+            Message::NextHunkCommitDetail => {
+                if let Overlay::CommitDetail { ref hunks, ref mut current_hunk, ref mut scroll, viewport_height, .. } = self.overlay {
+                    if !hunks.is_empty() && *current_hunk + 1 < hunks.len() {
+                        *current_hunk += 1;
+                        let offset = viewport_height / 3;
+                        *scroll = hunks[*current_hunk].display_start.saturating_sub(offset);
                     }
                 }
             }
@@ -1556,8 +1589,8 @@ impl App {
                 return Ok(());
             }
             Overlay::BranchList { .. } => return Ok(()),
-            Overlay::CommitDetail { diff_lines, scroll, .. } => {
-                if *scroll < diff_lines.len().saturating_sub(1) {
+            Overlay::CommitDetail { left_lines, scroll, .. } => {
+                if *scroll < left_lines.len().saturating_sub(1) {
                     *scroll += 1;
                 }
                 return Ok(());

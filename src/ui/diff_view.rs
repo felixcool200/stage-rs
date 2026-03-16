@@ -18,7 +18,12 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
         .style(Style::default().bg(theme.bg));
 
     let Some(ds) = &app.diff_state else {
-        let placeholder = Paragraph::new("Select a file to view diff").block(block);
+        let text = if app.large_file_skipped.is_some() {
+            ""
+        } else {
+            "Select a file to view diff"
+        };
+        let placeholder = Paragraph::new(text).block(block);
         frame.render_widget(placeholder, area);
         return;
     };
@@ -147,6 +152,30 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
         .style(Style::default().bg(theme.bg));
+
+    // Show large file warning instead of diff
+    if let Some((ref path, size, _)) = app.large_file_skipped {
+        let size_str = format_file_size(size);
+        let lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("  {path}"),
+                Style::default().fg(theme.fg),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                format!("  File is too large to auto-diff ({size_str})"),
+                Style::default().fg(theme.yellow),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Press Enter to load anyway",
+                Style::default().fg(theme.fg_dim),
+            )),
+        ];
+        frame.render_widget(Paragraph::new(lines).block(block), area);
+        return;
+    }
 
     let Some(ds) = &app.diff_state else {
         frame.render_widget(Paragraph::new("").block(block), area);
@@ -548,5 +577,15 @@ fn line_mode_marker(ds: &DiffState, row: usize, theme: &Theme) -> Span<'static> 
             Style::default().fg(mark_color).add_modifier(Modifier::BOLD),
         ),
         (false, false) => Span::styled("  ", Style::default()),
+    }
+}
+
+fn format_file_size(bytes: u64) -> String {
+    if bytes >= 1_073_741_824 {
+        format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
+    } else if bytes >= 1_048_576 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
     }
 }

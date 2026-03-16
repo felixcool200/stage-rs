@@ -8,7 +8,11 @@ use crate::syntax::Highlighter;
 use crate::theme::Theme;
 use color_eyre::Result;
 use std::collections::BTreeSet;
+use std::path::Path;
 use std::time::Instant;
+
+/// Files larger than this (1 MB) require explicit confirmation to diff.
+const LARGE_FILE_THRESHOLD: u64 = 1_048_576;
 
 // Re-export for other modules that import from crate::app
 pub use crate::conflict::{ConflictResolution, ConflictState};
@@ -49,6 +53,8 @@ pub struct App {
     pub theme: Theme,
     /// Terminal height in rows (updated each frame by main loop)
     pub term_height: usize,
+    /// Large file that was skipped during auto-load (path, size_bytes, is_staged)
+    pub large_file_skipped: Option<(String, u64, bool)>,
 }
 
 pub struct EditorRequest {
@@ -315,6 +321,7 @@ impl App {
             highlighter,
             theme,
             term_height: 24,
+            large_file_skipped: None,
         };
         // Load diff for the initially selected file
         if !app.file_entries.is_empty() {
@@ -574,7 +581,14 @@ impl App {
             Message::MoveDown => self.handle_move_down()?,
             Message::PrevHunk => self.handle_prev_hunk(),
             Message::NextHunk => self.handle_next_hunk(),
-            Message::SwitchPanel => self.handle_switch_panel(),
+            Message::SwitchPanel => {
+                // When pressing Enter on a large-file placeholder, load the file
+                if self.active_panel == Panel::FileList && self.large_file_skipped.is_some() {
+                    self.handle_load_large_file()?;
+                } else {
+                    self.handle_switch_panel();
+                }
+            }
 
             // ── Staging / unstaging ──────────────────────────────────────
             Message::StageFile => self.handle_stage_file()?,
@@ -730,6 +744,52 @@ impl App {
             Panel::FileList => Panel::DiffView,
             Panel::DiffView => Panel::FileList,
         };
+    }
+
+    fn handle_load_large_file(&mut self) -> Result<()> {
+        if let Some((path, _, staged)) = self.large_file_skipped.take() {
+            self.status_message = Some(format!("Loading large file: {path}"));
+            match self.repo.get_diff_content(&path, staged) {
+                Ok((old, new)) => {
+                    let (left_lines, right_lines, hunks) = git::compute_diff(&old, &new);
+                    let max_scroll = left_lines.len().max(right_lines.len());
+                    let viewport = self
+                        .diff_state
+                        .as_ref()
+                        .map(|ds| ds.viewport_height)
+                        .unwrap_or(24);
+                    let offset = viewport / 3;
+                    let scroll = hunks
+                        .first()
+                        .map(|h| h.display_start.saturating_sub(offset))
+                        .unwrap_or(0);
+                    self.diff_state = Some(DiffState {
+                        file_path: path,
+                        left_lines,
+                        right_lines,
+                        hunks,
+                        current_hunk: 0,
+                        scroll,
+                        max_scroll,
+                        old_content: old,
+                        new_content: new,
+                        view_mode: DiffViewMode::HunkNav,
+                        cursor_line: 0,
+                        selected_lines: BTreeSet::new(),
+                        hunk_changed_rows: Vec::new(),
+                        saved_line_selection: None,
+                        viewport_height: viewport,
+                        is_staged: staged,
+                    });
+                    self.status_message = None;
+                }
+                Err(_) => {
+                    self.diff_state = None;
+                    self.status_message = Some(format!("Cannot diff: {path}"));
+                }
+            }
+        }
+        Ok(())
     }
 
     // ── Staging handlers ─────────────────────────────────────────────────────
@@ -2100,6 +2160,25 @@ impl App {
         Ok(())
     }
 
+    /// Estimate the size of a file for the large-file check.
+    /// Uses the working-tree file size for unstaged files, or the index blob size for staged files.
+    fn estimate_file_size(&self, path: &str, staged: bool) -> u64 {
+        if staged {
+            // Check index blob size
+            if let Ok(index) = self.repo.repo.index() {
+                if let Some(entry) = index.get_path(Path::new(path), 0) {
+                    return entry.file_size as u64;
+                }
+            }
+            0
+        } else {
+            let full_path = self.repo.workdir().join(path);
+            std::fs::metadata(&full_path)
+                .map(|m| m.len())
+                .unwrap_or(0)
+        }
+    }
+
     fn load_selected_diff(&mut self) -> Result<()> {
         if let Some(entry) = self.selected_file_entry() {
             let path = entry.path.clone();
@@ -2144,6 +2223,16 @@ impl App {
             }
 
             let staged = matches!(status, FileStatus::Staged(_));
+
+            // Check file size before loading to avoid freezing on huge files
+            let file_size = self.estimate_file_size(&path, staged);
+            if file_size > LARGE_FILE_THRESHOLD {
+                self.diff_state = None;
+                self.large_file_skipped = Some((path, file_size, staged));
+                return Ok(());
+            }
+            self.large_file_skipped = None;
+
             match self.repo.get_diff_content(&path, staged) {
                 Ok((old, new)) => {
                     let (left_lines, right_lines, hunks) = git::compute_diff(&old, &new);

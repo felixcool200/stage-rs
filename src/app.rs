@@ -1768,7 +1768,12 @@ impl App {
 
         if self.active_panel == Panel::FileList {
             if self.header_selected {
-                // Already at top, do nothing
+                // Wrap to bottom
+                if !self.file_entries.is_empty() {
+                    self.header_selected = false;
+                    self.selected_index = self.file_entries.len() - 1;
+                    self.load_selected_diff()?;
+                }
             } else if self.selected_index > 0 {
                 self.selected_index -= 1;
                 self.load_selected_diff()?;
@@ -1880,6 +1885,12 @@ impl App {
             {
                 self.selected_index += 1;
                 self.load_selected_diff()?;
+            } else if !self.file_entries.is_empty() {
+                // Wrap to top (header)
+                self.header_selected = true;
+                self.selected_index = 0;
+                self.diff_state = None;
+                self.conflict_state = None;
             }
             return Ok(());
         }

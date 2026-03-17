@@ -31,8 +31,8 @@ impl FileStatus {
         match self {
             FileStatus::Conflict => 0,
             FileStatus::Unstaged(_) => 1,
-            FileStatus::Untracked => 2,
-            FileStatus::Staged(_) => 3,
+            FileStatus::Staged(_) => 2,
+            FileStatus::Untracked => 3,
         }
     }
 
@@ -228,10 +228,11 @@ mod tests {
         );
         assert!(
             FileStatus::Unstaged(ChangeKind::Modified).sort_key()
-                < FileStatus::Untracked.sort_key()
+                < FileStatus::Staged(ChangeKind::Modified).sort_key()
         );
         assert!(
-            FileStatus::Untracked.sort_key() < FileStatus::Staged(ChangeKind::Modified).sort_key()
+            FileStatus::Staged(ChangeKind::Modified).sort_key()
+                < FileStatus::Untracked.sort_key()
         );
     }
 

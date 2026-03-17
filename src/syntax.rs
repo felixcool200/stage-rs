@@ -34,10 +34,13 @@ impl Highlighter {
         let mut h = HighlightLines::new(syntax, &self.theme);
         let regions = h.highlight_line(content, &self.syntax_set).ok()?;
 
+        let theme_bg = self.theme.settings.background;
+        let theme_fg = self.theme.settings.foreground;
+
         let spans = regions
             .into_iter()
             .map(|(style, text)| {
-                let fg = syn_color_to_ratatui(style);
+                let fg = syn_color_to_ratatui_checked(style, theme_bg, theme_fg);
                 Span::styled(text, Style::default().fg(fg).bg(bg))
             })
             .collect();
@@ -45,8 +48,27 @@ impl Highlighter {
     }
 }
 
-fn syn_color_to_ratatui(style: SynStyle) -> Color {
+/// Convert syntect foreground color to ratatui, substituting the theme's default
+/// foreground when the color is too close to the theme background (which would
+/// make text invisible). Some syntect themes assign their background color as
+/// the foreground for certain tokens (e.g. `)` in JavaScript with base16-eighties.dark).
+fn syn_color_to_ratatui_checked(
+    style: SynStyle,
+    theme_bg: Option<syntect::highlighting::Color>,
+    theme_fg: Option<syntect::highlighting::Color>,
+) -> Color {
     let c = style.foreground;
+    if let Some(bg) = theme_bg {
+        let dist_sq = (c.r as i32 - bg.r as i32).pow(2)
+            + (c.g as i32 - bg.g as i32).pow(2)
+            + (c.b as i32 - bg.b as i32).pow(2);
+        if dist_sq < 400 {
+            // Too close to background — use theme default foreground
+            return theme_fg
+                .map(|fc| Color::Rgb(fc.r, fc.g, fc.b))
+                .unwrap_or(Color::White);
+        }
+    }
     Color::Rgb(c.r, c.g, c.b)
 }
 

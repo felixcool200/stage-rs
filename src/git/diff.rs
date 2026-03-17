@@ -83,7 +83,10 @@ pub fn compute_diff(old: &str, new: &str) -> (Vec<DiffLine>, Vec<DiffLine>, Vec<
     let mut hunk_index: usize = 0;
 
     for change in diff.iter_all_changes() {
-        let text = change.value().trim_end_matches('\n').to_string();
+        let text = change
+            .value()
+            .trim_end_matches('\n')
+            .replace('\t', "    ");
         let display_row = left_lines.len();
 
         match change.tag() {

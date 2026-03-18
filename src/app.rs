@@ -2270,11 +2270,16 @@ impl App {
                         .map(|ds| ds.hunk_changed_rows.clone())
                         .unwrap_or_default();
                     let prev_viewport = prev.map(|ds| ds.viewport_height).unwrap_or(24);
+                    let prev_scroll = prev.map(|ds| ds.scroll);
                     let offset = prev_viewport / 3;
-                    let scroll = hunks
-                        .get(prev_hunk)
-                        .map(|h| h.display_start.saturating_sub(offset))
-                        .unwrap_or(0);
+                    let scroll = prev_scroll
+                        .map(|s| s.min(max_scroll))
+                        .unwrap_or_else(|| {
+                            hunks
+                                .get(prev_hunk)
+                                .map(|h| h.display_start.saturating_sub(offset))
+                                .unwrap_or(0)
+                        });
                     let prev_saved = prev.and_then(|ds| ds.saved_line_selection.clone());
                     self.diff_state = Some(DiffState {
                         file_path: path,

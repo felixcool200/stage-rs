@@ -573,6 +573,9 @@ impl App {
             Message::Refresh => self.handle_refresh()?,
             Message::AutoRefresh => {
                 self.refresh()?;
+                if self.diff_state.is_some() {
+                    self.load_selected_diff()?;
+                }
                 self.last_refresh = Instant::now();
             }
 
@@ -1188,6 +1191,7 @@ impl App {
                     Ok(()) => {
                         self.status_message = Some(format!("Popped stash@{{{sel}}}"));
                         self.refresh()?;
+                        self.load_selected_diff()?;
                     }
                     Err(e) => {
                         self.status_message = Some(format!("Stash pop failed: {e}"));
@@ -1210,6 +1214,7 @@ impl App {
                     Ok(()) => {
                         self.status_message = Some(format!("Applied stash@{{{sel}}}"));
                         self.refresh()?;
+                        self.load_selected_diff()?;
                     }
                     Err(e) => {
                         self.status_message = Some(format!("Stash apply failed: {e}"));
@@ -1313,6 +1318,7 @@ impl App {
                 Ok(()) => {
                     self.status_message = Some(format!("Discarded: {path}"));
                     self.refresh()?;
+                    self.load_selected_diff()?;
                 }
                 Err(e) => {
                     self.status_message = Some(format!("Discard failed: {e}"));
@@ -1473,6 +1479,7 @@ impl App {
                 Ok(o) if o.status.success() => {
                     self.status_message = Some("Rebase completed".into());
                     self.refresh()?;
+                    self.load_selected_diff()?;
                 }
                 Ok(o) => {
                     let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
@@ -1482,6 +1489,7 @@ impl App {
                                 .into(),
                         );
                         self.refresh()?;
+                        self.load_selected_diff()?;
                     } else {
                         self.status_message = Some(format!("Rebase failed: {err}"));
                     }

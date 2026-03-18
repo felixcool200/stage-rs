@@ -89,6 +89,8 @@ pub struct DiffState {
     pub viewport_height: usize,
     /// Whether this diff is for a staged file (HEAD vs index)
     pub is_staged: bool,
+    /// Horizontal scroll offset (columns)
+    pub h_scroll: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,6 +216,8 @@ pub struct WhichKeyEntry {
 pub enum Message {
     MoveUp,
     MoveDown,
+    ScrollLeft,
+    ScrollRight,
     PrevHunk,
     NextHunk,
     SwitchPanel,
@@ -582,6 +586,8 @@ impl App {
             // ── Navigation ───────────────────────────────────────────────
             Message::MoveUp => self.handle_move_up()?,
             Message::MoveDown => self.handle_move_down()?,
+            Message::ScrollLeft => self.handle_scroll_left(),
+            Message::ScrollRight => self.handle_scroll_right(),
             Message::PrevHunk => self.handle_prev_hunk(),
             Message::NextHunk => self.handle_next_hunk(),
             Message::SwitchPanel => {
@@ -732,6 +738,18 @@ impl App {
         }
     }
 
+    fn handle_scroll_left(&mut self) {
+        if let Some(ds) = &mut self.diff_state {
+            ds.h_scroll = ds.h_scroll.saturating_sub(4);
+        }
+    }
+
+    fn handle_scroll_right(&mut self) {
+        if let Some(ds) = &mut self.diff_state {
+            ds.h_scroll += 4;
+        }
+    }
+
     fn handle_switch_panel(&mut self) {
         if self.active_panel == Panel::DiffView {
             if let Some(ds) = &mut self.diff_state {
@@ -783,6 +801,7 @@ impl App {
                         saved_line_selection: None,
                         viewport_height: viewport,
                         is_staged: staged,
+                        h_scroll: 0,
                     });
                     self.status_message = None;
                 }
@@ -2270,6 +2289,7 @@ impl App {
                         .map(|ds| ds.hunk_changed_rows.clone())
                         .unwrap_or_default();
                     let prev_viewport = prev.map(|ds| ds.viewport_height).unwrap_or(24);
+                    let prev_h_scroll = prev.map(|ds| ds.h_scroll).unwrap_or(0);
                     let prev_scroll = prev.map(|ds| ds.scroll);
                     let offset = prev_viewport / 3;
                     let scroll = prev_scroll
@@ -2298,6 +2318,7 @@ impl App {
                         saved_line_selection: prev_saved,
                         viewport_height: prev_viewport,
                         is_staged: staged,
+                        h_scroll: prev_h_scroll,
                     });
                 }
                 Err(_) => {
@@ -2707,6 +2728,7 @@ end";
             saved_line_selection: None,
             viewport_height,
             is_staged: false,
+            h_scroll: 0,
         }
     }
 

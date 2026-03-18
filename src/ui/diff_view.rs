@@ -90,7 +90,8 @@ pub fn render_left(app: &App, frame: &mut Frame, area: Rect) {
                 spans.push(line_mode_marker(ds, i, theme));
             }
             spans.push(Span::styled(line_num, num_style));
-            push_highlighted_content(app, &dl.content, &dl.kind, text_style, &mut spans);
+            let visible = skip_chars(&dl.content, ds.h_scroll);
+            push_highlighted_content(app, visible, &dl.kind, text_style, &mut spans);
             Line::from(spans)
         })
         .collect();
@@ -202,7 +203,8 @@ fn render_right_diff(app: &App, frame: &mut Frame, area: Rect) {
                 spans.push(line_mode_marker(ds, i, theme));
             }
             spans.push(Span::styled(line_num, num_style));
-            push_highlighted_content(app, &dl.content, &dl.kind, text_style, &mut spans);
+            let visible = skip_chars(&dl.content, ds.h_scroll);
+            push_highlighted_content(app, visible, &dl.kind, text_style, &mut spans);
             Line::from(spans)
         })
         .collect();
@@ -465,6 +467,15 @@ fn render_conflict(
 }
 
 /// Push syntax-highlighted spans for a line's content, falling back to a single styled span.
+/// Return the substring after skipping `n` characters (char-aware).
+fn skip_chars(s: &str, n: usize) -> &str {
+    if n == 0 {
+        return s;
+    }
+    let byte_offset = s.char_indices().nth(n).map(|(i, _)| i).unwrap_or(s.len());
+    &s[byte_offset..]
+}
+
 fn push_highlighted_content<'a>(
     app: &App,
     content: &'a str,

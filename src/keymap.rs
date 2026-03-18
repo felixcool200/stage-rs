@@ -187,6 +187,18 @@ static DIFF_HUNK_NAV: &[Binding] = &[
         show_in_hint: true,
     },
     Binding {
+        keys: &[KeyBind::shift(Left)],
+        label: "scroll",
+        message: ScrollLeft,
+        show_in_hint: true,
+    },
+    Binding {
+        keys: &[KeyBind::shift(Right)],
+        label: "scroll",
+        message: ScrollRight,
+        show_in_hint: true,
+    },
+    Binding {
         keys: &[KeyBind::plain(Left)],
         label: "files",
         message: SwitchPanel,
@@ -223,6 +235,18 @@ static DIFF_LINE_NAV: &[Binding] = &[
         keys: &[KeyBind::shift(Up)],
         label: "prev hunk",
         message: PrevHunk,
+        show_in_hint: false,
+    },
+    Binding {
+        keys: &[KeyBind::shift(Left)],
+        label: "scroll ←",
+        message: ScrollLeft,
+        show_in_hint: false,
+    },
+    Binding {
+        keys: &[KeyBind::shift(Right)],
+        label: "scroll →",
+        message: ScrollRight,
         show_in_hint: false,
     },
     Binding {
